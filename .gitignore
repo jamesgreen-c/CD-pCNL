@@ -6,6 +6,12 @@ __pycache__/
 # C extensions
 *.so
 
+# any results plots
+plots/
+results/
+remote-results/
+if-results/
+
 # Distribution / packaging
 .Python
 build/
