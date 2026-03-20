@@ -31,8 +31,8 @@ def delyonhu(xs: Array, drift: Callable, diffusion: Callable, dt: Array):
     _i2 = lambda t, x: drift(t, x) @ _i1(t, x)
     _i3 = lambda t, x: (xs[-1] - x) / jnp.sqrt(dt - t)
 
-    i1 = integrate_dx(dt, 0, _i1, xs)
-    i2 = integrate_dt(dt, 0, _i2, xs)
-    i3 = integrate_dcov_inv(dt, 0, _i3, _cov, xs)
+    i1 = integrate_dx(0, dt, _i1, xs)
+    i2 = integrate_dt(0, dt, _i2, xs)
+    i3 = integrate_dcov_inv(0, dt, _i3, _cov, xs)
 
     return i1 - 0.5*i2 - i3
