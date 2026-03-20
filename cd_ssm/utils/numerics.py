@@ -119,4 +119,69 @@ def integrate_dcov_inv(a: Array, b: Array, f: Callable, cov: Callable, xs: Array
     dcov_invs = cov_invs[1:] - cov_invs[:-1]
     
     fs = vmap(f)(ts[:-1], xs[:-1])
-    return jnp.sum(jnp.einsum("ni,nij,nj->", fs, dcov_invs, fs), axis=0)
+    return jnp.einsum("ni,nij,nj->", fs, dcov_invs, fs)
+
+
+########################
+##        TESTS       ##
+########################
+
+def _test_integrate_dt():
+    T = 2.0
+    num = 10001
+    ts = jnp.linspace(0.0, T, num)
+    xs = jnp.stack([ts, 2.0 * ts], axis=1)   # (num, 2)
+
+    f = lambda t, x: t + jnp.sum(x)
+
+    val = integrate_dt(0.0, T, f, xs)
+    true = 2.0 * T**2
+
+    print("integrate_dt:")
+    print("approx =", val)
+    print("true   =", true)
+    print("error  =", jnp.abs(val - true))
+
+
+
+def _test_integrate_dx():
+    T = 2.0
+    num = 10001
+    ts = jnp.linspace(0.0, T, num)
+    xs = jnp.stack([ts, 2.0 * ts], axis=1)   # (num, 2)
+
+    f = lambda t, x: x
+
+    val = integrate_dx(0.0, T, f, xs)
+    true = 2.5 * T**2
+
+    print("\nintegrate_dx:")
+    print("approx =", val)
+    print("true   =", true)
+    print("error  =", jnp.abs(val - true))
+
+
+def _test_integrate_dcov_inv():
+    T = 2.0
+    num = 10001
+    ts = jnp.linspace(0.0, T, num)
+    xs = jnp.stack([ts, 2.0 * ts], axis=1)   # (num, 2)
+
+    def cov(t, x):
+        return (1.0 + t) * jnp.eye(2)
+
+    f = lambda t, x: jnp.ones(2)
+
+    val = integrate_dcov_inv(0.0, T, f, cov, xs)
+    true = 2.0 * (1.0 / (1.0 + T) - 1.0)
+
+    print("\nintegrate_dcov_inv:")
+    print("approx =", val)
+    print("true   =", true)
+    print("error  =", jnp.abs(val - true))
+
+
+if __name__ == "__main__":
+    _test_integrate_dt()
+    _test_integrate_dx()
+    _test_integrate_dcov_inv()
