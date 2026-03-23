@@ -98,3 +98,8 @@ def _logpdf(x, m, chol):
     y = solve_triangular(chol, x - m, lower=True)
     norm_y = jnp.sum(y * y)
     return -0.5 * norm_y
+
+
+def logdet(E):
+    sign, _logdet = jnp.linalg.slogdet(E)
+    return _logdet

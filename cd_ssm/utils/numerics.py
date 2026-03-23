@@ -10,7 +10,8 @@ def euler(
         key: PRNGKey,
         drift: Callable, 
         diffusion: Callable, 
-        x0: Array, 
+        x0: Array,
+        t0: Array, 
         t: Array, 
         num: Array, 
         N: Array
@@ -23,7 +24,8 @@ def euler(
     key:        RNG
     drift:      The drift function. Should take (t, x) as args
     diffusion:  The diffusion function. Should take (t, x) as args
-    x0:         The starting point. Shape (N', d, ...) for N particles. (strictly speaking N' can be = 1 when N isn't)
+    x0:         The starting point. Shape (N, d, ...) for N particles.
+    t0:         The starting time
     t:          The amount of time that passes
     num:        The number of steps to take in dt time
     N:          The number of particles
@@ -35,7 +37,7 @@ def euler(
 
     eps = jr.normal(key, (num, N, *x0.shape[1:]))
     dt = t / num
-    ts = jnp.arange(num) * dt
+    ts = t0 + jnp.arange(num) * dt
 
     def _body(x_k, inps):
         t_k, eps_k = inps
@@ -43,7 +45,7 @@ def euler(
         return x_k_p_1, x_k_p_1
     
     _, xs = lax.scan(_body, x0, (ts, eps))
-    xs = jnp.insert(xs, 0, x0)
+    xs = jnp.insert(xs, 0, x0, axis=0)
     return xs
     
 
