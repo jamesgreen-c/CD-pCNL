@@ -9,11 +9,13 @@ import numpy as np
 from jax.scipy.stats import norm
 
 
-from experiments.lgssm.model import log_likelihood, log_potential, log_pdf
-from cd_ssm.utils.numerics import euler
+from experiments.lgssm.model import log_potential
+
 from cd_ssm.utils.math import mvn_logpdf
+from cd_ssm import euler
 from cd_ssm import brownian as br
 from cd_ssm import csmc
+from cd_ssm import bridge
 
 
 class KernelType(Enum):
@@ -23,6 +25,8 @@ class KernelType(Enum):
     @property
     def kernel_maker(self):
         if self == KernelType.CSMC:
+            return get_csmc_kernel
+        elif self == KernelType.PCN:
             return get_pcn_csmc_kernel
         else:
             raise NotImplementedError
@@ -40,62 +44,124 @@ class KernelType(Enum):
 #######################
 
 
-def get_csmc_kernel(ys, drift: Callable, diffusion: Callable, sigma, N, style="bootstrap", **kwargs):
-    """
-    
-    TODO:
-        1. Implement a generic euler scheme:
-            - This will require making model.py define drift and diffusion functions, then passing this to the euler scheme
-        2. Implement a generic transform W to X scheme. This is just an euler with a predetermined noise path
-        3. Implement a generic DelyonHu bridge SDE to calculate the potential function as in Stanton 2025
-            - This will require an additional generic implementation of Reimann summations (numeric integral calculation)
-    
-        THERE IS SOME WEIRD THINGS GOING ON AT TIME 0
-        NOTICE THAT IN THE BACKWARD PROPOSAL ALL ENDPOINTS CAN BE SAMPLED BEFORE RUNNING cSMC
+def get_csmc_kernel(ys, drift: Callable, diffusion: Callable, sigma, N, num, dts, style="guided", **kwargs):
     """
 
-    T, dz = ys.shape
-
-    if style == "bootstrap":
+    """
+    T, dx = ys.shape
+    ts = jnp.concatenate([jnp.array([0.0]), jnp.cumsum(dts)])
+    
+    if style == "guided":
 
         def M0_rvs(key, _):
             """ Returns t0 distribution for pathspace not z-space """
-            x0 = sigma * jr.normal(key, (N + 1, dz))
-            return x0
-        
-        M0_logpdf = lambda x: norm.logpdf(x, scale=sigma).sum()
-        M0_logpdf = jnp.vectorize(M0_logpdf, signature="(d)->()")
-        
-        def Mt_rvs(key, e_t_m_1, params):
-            y_t, t, dt, num = params
+            key1, key2, key3 = jr.split(key, 3)
+            
+            z_0 = br.simulate(key1, jnp.zeros((dx,)), dts[0], num-1, N+1)
+            
+            e0 = sigma * jr.normal(key2, (N + 1, dx))
+            e_1s = euler.euler(key3, drift, diffusion, e0, ts[0], dts[0], 1, N+1)
+            x = bridge.euler(diffusion, z_0, e0, e_1s[-1], 0, dts[0])
+            return x
+                
+        def Mt_rvs(key, x_t_m_1, params):
+            y_t, t, dt = params
 
             key1, key2 = jr.split(key)
-            z_t0 = jnp.zeros((dz,))
+            z_t = br.simulate(key1, jnp.zeros((dx,)), dt, num, N + 1)  # exact brownian simulation
             
-            z_t = br.simulate(key1, z_t0, dt, num, N + 1)  # exact brownian simulation
-            e_ts = euler(key2, drift, diffusion, e_t_m_1, t, dt, 1, N + 1)
-            return z_t, e_ts[-1]
+            e_ts = euler.euler(key2, drift, diffusion, x_t_m_1[-1], t, dt, 1, N + 1)
+            x = bridge.euler(diffusion, z_t, x_t_m_1[-1], e_ts[-1], t, dt)            
+            return x[1:]  # remove duplicate endpoint
+
+        M0_logpdf = lambda x: norm.logpdf(x[0], scale=sigma).sum() + euler.logpdf(x[-1], x[0], drift, diffusion)
+        Mt_logpdf = lambda x_t_m_1, x_t, params: euler.logpdf(x_t, x_t_m_1, drift, diffusion, params[0], params[1])
         
-        def G0(x):
+        def Gamma_0(x):
             """ Returns discrete weight for x0 """
             sig = diffusion(0, x)
             cov = sig @ sig.T
             chol_Q = jnp.linalg.cholesky(cov)
-            return mvn_logpdf(ys[0], x, chol_Q, constant=False)
+            return mvn_logpdf(ys[0], x, chol_Q, constant=False) + M0_logpdf(x)
         
-        def Gt(z_t, e_t_m_1, e_t, params):
-            y_t = params[0]
-            params = (e_t_m_1, e_t, *params[1:])
-            return log_potential(z_t, y_t, drift, diffusion, params)
+        def Gamma_t(x_t_m_1, x_t, params):
+            y_t, t, dt = params
+            return log_potential(x_t, x_t_m_1, y_t, drift, diffusion, t, dt)
 
     else:
-        raise NotImplementedError(f"Unknown style: {style}, choose from 'bootstrap'")
+        raise NotImplementedError(f"Unknown style: {style}, choose from 'guided'")
 
     M0 = M0_rvs, M0_logpdf
-    Mt = Mt_rvs, (ys[1:], ts[1:], dts)
-    Gt_plus_params = Gt, (ys[1:], ts[1:], dts)
+    Mt = Mt_rvs, Mt_logpdf, (ys[1:], ts[1:], dts)
+    Gamma_t_plus_params = Gamma_t, (ys[1:], ts[1:], dts)
 
-    kernel = lambda key, state, *_: csmc.kernel(key, state[0], state[1], M0, G0, Mt, Gt_plus_params, N=N,
+    kernel = lambda key, state, *_: csmc.kernel(key, state[0], state[1], M0, Gamma_0, Mt, Gamma_t_plus_params, N=N,
+                                                **kwargs)
+    init = lambda x: (x, jnp.zeros((x.shape[0],), dtype=int))
+
+    return kernel, init
+
+
+def get_filter_csmc_kernel(ys, drift: Callable, diffusion: Callable, sigma, N, num, dts, style="guided", **kwargs):
+    """
+
+    """
+    T, dx = ys.shape
+    ts = jnp.concatenate([jnp.array([0.0]), jnp.cumsum(dts)])[:-1]
+
+    if style == "guided":
+
+        # def M0_rvs(key, _):
+        #     """ Returns t0 distribution for pathspace not z-space """
+        #     x0 = sigma * jr.normal(key, (N + 1, num + 1, dx))
+        #     return x0
+        
+        def M0_rvs(key, _):
+            e0 = sigma * jr.normal(key, (N + 1, dx))
+            return jnp.repeat(e0[:, None, :], num + 1, axis=1)
+
+        def Mt_rvs(key, x_t_m_1, params):
+            y_t, t, dt = params
+
+            key1, key2 = jr.split(key)
+            z_t0 = jnp.zeros((N + 1, dx))
+            z_t = br.simulate(key1, z_t0, dt, num, N + 1)  # exact brownian simulation
+            
+            e_ts = euler.euler(key2, drift, diffusion, x_t_m_1[:, -1], t, dt, 1, N + 1)
+            x = bridge.euler(diffusion, z_t, x_t_m_1[:, -1], e_ts[:, -1], t, dt)            
+            return x[:, 1:]  # remove duplicate endpoint
+
+        
+        M0_logpdf = lambda x: norm.logpdf(x[-1], scale=sigma).sum()
+        M0_logpdf = jax.vmap(M0_logpdf)
+        
+        Mt_logpdf = lambda x_t_m_1, x_t, params: euler.logpdf(x_t[-1], x_t_m_1[-1], drift, diffusion, params[1], params[2])
+        Mt_logpdf = jax.vmap(Mt_logpdf, in_axes=(0, 0, None))
+
+        @jax.vmap
+        def Gamma_0(x):
+            """ Returns discrete weight for x0 """
+            e = x[-1]
+            obs_ll = jnp.sum(norm.logpdf(ys[0], loc=e))
+            prior_ll = jnp.sum(norm.logpdf(e, scale=sigma))
+            return obs_ll + prior_ll
+            # cov = sig @ sig.T
+            # chol_Q = jnp.linalg.cholesky(cov)
+            # return mvn_logpdf(ys[0], x, chol_Q, constant=False) + M0_logpdf(x[-1])
+
+        @partial(jax.vmap, in_axes=(0, 0, None))
+        def Gamma_t(x_t_m_1, x_t, params):
+            y_t, t, dt = params
+            return log_potential(x_t, x_t_m_1, y_t, drift, diffusion, t, dt)
+
+    else:
+        raise NotImplementedError(f"Unknown style: {style}, choose from 'guided'")
+
+    M0 = M0_rvs, M0_logpdf
+    Mt = Mt_rvs, Mt_logpdf, (ys[1:], ts[1:], dts[1:])
+    Gamma_t_plus_params = Gamma_t, (ys[1:], ts[1:], dts[1:])
+
+    kernel = lambda key, state, *_: csmc.forward_pass(key, state[0], state[1], M0, Gamma_0, Mt, Gamma_t_plus_params, N=N,
                                                 **kwargs)
     init = lambda x: (x, jnp.zeros((x.shape[0],), dtype=int))
 

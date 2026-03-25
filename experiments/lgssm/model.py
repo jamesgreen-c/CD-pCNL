@@ -18,6 +18,7 @@ from cd_ssm import bridge
 def get_dynamics(phi: float, sigma: float):
 
     def drift(t, x):
+        x = jnp.atleast_1d(x)
         return -phi * x
     
     def diffusion(t, x):
@@ -27,33 +28,39 @@ def get_dynamics(phi: float, sigma: float):
 
 
 @partial(jax.jit, static_argnums=(3))
-def get_data(key: PRNGKey, phi: float, sigma: float, dim: int, dT: Array):
+def get_data(key: PRNGKey, phi: float, sigma: float, dim: int, dts: Array):
     """
     Produce continuous time LGSSM data where
         dX_t = -phi X_t dt + sigma dW_t
         Y_k | X_{t_k} ~ N(X_{t_k}, I)
-    where dT[k] = t_{k+1} - t_k.
+    where dts[k] = t_{k+1} - t_k.
 
     Parameters
     ----------
+    key:   PRNGKey
+    phi:   Persistence parameter
+    sigma: Standard deviation of prior dynamics
+    dim:   Dimension of latent state
+    dts:   (K,)  The time deltas for all K steps
 
     Returns
     -------
-    xs: (T, dim) Latent states x_0, ..., x_{T-1}
-    ys: (T, dim) Observations y_0, ..., y_{T-1}
-    As: (T, 1) Persistence for each timestep
-    Qs: (T, 1) STD for each timestep 
+    xs: (K, dim) Latent states x_0, ..., x_{K-1}
+    ys: (K, dim) Observations y_0, ..., y_{K-1}
+    As: (K, 1) Persistence for each timestep
+    Qs: (K, 1) STD for each timestep 
     """
 
     init_key, sampling_key = jax.random.split(key)
-    T = dT.shape[0]  # number of timesteps rather than horizon time
+    K = dts.shape[0]  # number of timesteps rather than horizon time
 
-    x0 = (sigma / jnp.sqrt(2 * phi)) * jax.random.normal(init_key, (dim,))
-    eps_xs, eps_ys = jax.random.normal(sampling_key, (2, T, dim))
+    chol_P0 = (sigma / jnp.sqrt(2 * phi))
+    x0 = chol_P0 * jax.random.normal(init_key, (dim,))
+    eps_xs, eps_ys = jax.random.normal(sampling_key, (2, K, dim))
 
     # continuous time dynamics
-    As = jnp.exp(-phi * dT)
-    Qs = sigma * jnp.sqrt((1.0 - jnp.exp(-2.0 * phi * dT)) / (2.0 * phi))
+    As = jnp.exp(-phi * dts)
+    chol_Qs = sigma * jnp.sqrt((1.0 - jnp.exp(-2.0 * phi * dts)) / (2.0 * phi))
 
     def body(x_k, inps):
         eps_x, eps_y, At, Qt = inps
@@ -61,33 +68,24 @@ def get_data(key: PRNGKey, phi: float, sigma: float, dim: int, dT: Array):
         x_kp1 = At * x_k + Qt * eps_x
         return x_kp1, (x_k, y_k)
     
-    _, (xs, ys) = jax.lax.scan(body, x0, (eps_xs, eps_ys, As, Qs))
-    return xs, ys, As, Qs
+    _, (xs, ys) = jax.lax.scan(body, x0, (eps_xs, eps_ys, As, chol_Qs))
+    return xs, ys, As, chol_Qs, chol_P0
 
 
 
-@partial(jnp.vectorize, signature="(n),(n)->()", excluded=(2, 3, 4))
-def log_potential(z, y, drift: Callable, diffusion: Callable, params):
-    e_t_m_1, e_t, t, dt = params
+# @partial(jnp.vectorize, signature="(n),(n),(n)->()", excluded=(3, 4, 5, 6))
+def log_potential(x, xp, y, drift: Callable, diffusion: Callable, t: Array, dt: Array):
+    e, ep = x[-1, None], xp[-1, None]
 
     def _cov(t, x):
-        sig = diffusion(t, x)
+        sig = diffusion(t, x) * jnp.eye(x.shape[0])
         return sig @ sig.T
-
-    val = norm.logpdf(y, x)
-    val += norm.logpdf(e_t, e_t_m_1, scale=diffusion(0, e_t)).sum()
     
-    val += 0.5 * logdet(_cov(0, e_t_m_1)) - logdet(_cov(dt, e_t))
-    val -= mvn_logpdf(
-        e_t, 
-        e_t_m_1 + drift(t, e_t_m_1) * dt,
-        jnp.linalg.cholesky(dt * _cov(t, e_t_m_1))
-    )
-
-    x = bridge.euler(diffusion, z, e_t_m_1, e_t, dt)
+    val = norm.logpdf(y, e).sum()
+    val += norm.logpdf(e, ep, scale=diffusion(0, ep)).sum()
+    val += 0.5 * (logdet(_cov(0, ep)) - logdet(_cov(dt, e)))
     val += delyonhu(x, drift, diffusion, t, dt)
-
-    return jnp.sum(val)
+    return val
 
 
 # def log_likelihood(x, y):
@@ -106,7 +104,7 @@ def log_potential(z, y, drift: Callable, diffusion: Callable, params):
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
-    from cd_ssm.utils.numerics import euler
+    from cd_ssm.euler import euler
 
     key = jax.random.PRNGKey(0)
     phi = 0.5
