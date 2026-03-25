@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as jnp
 
-from gradient_csmc.utils.pbar import progress_bar_scan
+from cd_ssm.utils.pbar import progress_bar_scan
 from functools import partial
 
 

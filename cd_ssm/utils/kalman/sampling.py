@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 from chex import Array, PRNGKey
 
-from gradient_csmc.utils.kalman.filtering import sequential_update
+from cd_ssm.utils.kalman.filtering import sequential_update
 
 
 def sampling(key: PRNGKey, ms: Array, Ps: Array, Fs, Qs, bs, N=1) -> Array:

@@ -15,6 +15,7 @@ def euler(
         ws: Array,
         x0: Array,
         xT: Array,
+        t0: Array,
         t: Array,
     ):
     """
@@ -33,11 +34,11 @@ def euler(
     
     Returns
     ----------
-    xs:         The resulting interpolated paths (N, d, ..., num)
+    xs:         The resulting interpolated paths (N, num, d, ...)
     """
-    num = ws.shape[0]
+    num = ws.shape[0] - 1
     dt = t / num
-    ts = jnp.arange(num) * dt
+    ts = t0 + jnp.arange(num + 1) * dt
 
     def _body(x_k, inps):
         t_k, w_k = inps
@@ -46,4 +47,5 @@ def euler(
     
     _, xs = lax.scan(_body, x0, (ts, ws))
     xs = jnp.insert(xs, 0, x0, axis=0)
+    xs = jnp.swapaxes(xs, 0, 1)
     return xs
