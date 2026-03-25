@@ -11,6 +11,7 @@ plots/
 results/
 remote-results/
 if-results/
+filter-results/
 
 # Distribution / packaging
 .Python
