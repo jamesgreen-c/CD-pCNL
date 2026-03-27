@@ -38,4 +38,5 @@ def simulate(
 
     _, ws = lax.scan(_body, w0, eps)
     ws = jnp.insert(ws, 0, w0, axis=0)
+    ws = jnp.swapaxes(ws, 0, 1)
     return ws
