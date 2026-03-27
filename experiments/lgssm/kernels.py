@@ -12,9 +12,10 @@ from jax.scipy.stats import norm
 from experiments.lgssm.model import log_potential
 
 from cd_ssm.utils.math import mvn_logpdf
+from cd_ssm.utils.mcmc_utils import aux_sampling_routine
 from cd_ssm import euler
 from cd_ssm import brownian as br
-from cd_ssm import csmc
+from cd_ssm import t_csmc
 from cd_ssm import bridge
 
 
@@ -76,40 +77,36 @@ def get_csmc_kernel(ys, drift: Callable, diffusion: Callable, sigma, N, num, dts
     if style == "guided":
 
         def M0_rvs(key, _):
-            e0 = sigma * jr.normal(key, (N + 1, dx))
-            return jnp.repeat(e0[:, None, :], num + 1, axis=1)
+            key1, key2 = jr.split(key)
+            u_00 = jnp.zeros((N+1, dx))
+            u_0 = br.simulate(key1, u_00, dts[0], num, N + 1) 
+            e_0 = sigma * jr.normal(key2, (N + 1, dx))
+            return (u_0, e_0)
 
-        def Mt_rvs(key, x_t_m_1, params):
-            y_t, t, dt = params
+        def Mt_rvs(key, z_t_m_1, params):
+            _, t, dt = params
+            _, e_t_m_1 = z_t_m_1
 
             key1, key2 = jr.split(key)
-            z_t0 = jnp.zeros((N + 1, dx))
-            z_t = br.simulate(key1, z_t0, dt, num, N + 1)  # exact brownian simulation
-            
-            e_ts = euler.euler(key2, drift, diffusion, x_t_m_1[:, -1], t, dt, 1, N + 1)
-            x = bridge.euler(diffusion, z_t, x_t_m_1[:, -1], e_ts[:, -1], t, dt)            
-            return x[:, 1:]  # remove duplicate endpoint
+            u_t0 = jnp.zeros((N + 1, dx))
+            u_t = br.simulate(key1, u_t0, dt, num, N + 1)
+            e_ts = euler.euler(key2, drift, diffusion, e_t_m_1, t, dt, 1, N + 1)
+            return (u_t, e_ts[:, -1])
 
-        
-        M0_logpdf = lambda x: norm.logpdf(x[-1], scale=sigma).sum()
-        M0_logpdf = jax.vmap(M0_logpdf)
-        
-        Mt_logpdf = lambda x_t_m_1, x_t, params: euler.logpdf(x_t[-1], x_t_m_1[-1], drift, diffusion, params[1], params[2])
-        Mt_logpdf = jax.vmap(Mt_logpdf, in_axes=(0, 0, None))
+        M0_logpdf = lambda z: norm.logpdf(z[1], loc=0.0, scale=sigma).sum(axis=-1)
+        Mt_logpdf = lambda z_t_m_1, z_t, params: jax.vmap(lambda ep, e: euler.logpdf(e, ep, drift, diffusion, params[1], params[2]))(z_t_m_1[1], z_t[1])
 
-        @jax.vmap
-        def Gamma_0(x):
-            """ Returns discrete weight for x0 """
-            e = x[-1]
-            obs_ll = jnp.sum(norm.logpdf(ys[0], loc=e))
-            prior_ll = jnp.sum(norm.logpdf(e, scale=sigma))
-            return obs_ll + prior_ll
+        def Gamma_0(z):
+            _, e = z
+            return norm.logpdf(ys[0], loc=e).sum(axis=-1) + M0_logpdf(z)
 
-        @partial(jax.vmap, in_axes=(0, 0, None))
-        def Gamma_t(x_t_m_1, x_t, params):
+        def Gamma_t(z_t_m_1, z_t, params):
             y_t, t, dt = params
-            return log_potential(x_t, x_t_m_1, y_t, drift, diffusion, t, dt)
-
+            _, e_t_m_1 = z_t_m_1
+            u_t, e_t = z_t
+            x_t = bridge.to_path(diffusion, u_t, e_t_m_1, e_t, t, dt)
+            return log_potential(x_t, e_t_m_1, y_t, drift, diffusion, t, dt)
+        
     else:
         raise NotImplementedError(f"Unknown style: {style}, choose from 'guided'")
 
@@ -117,11 +114,14 @@ def get_csmc_kernel(ys, drift: Callable, diffusion: Callable, sigma, N, num, dts
     Mt = Mt_rvs, Mt_logpdf, (ys[1:], ts[1:], dts[1:])
     Gamma_t_plus_params = Gamma_t, (ys[1:], ts[1:], dts[1:])
 
-    kernel = lambda key, state, *_: csmc.kernel(key, state[0], state[1], M0, Gamma_0, Mt, Gamma_t_plus_params, N=N,
+    kernel = lambda key, state, *_: t_csmc.kernel(key, state[0], state[1], M0, Gamma_0, Mt, Gamma_t_plus_params, N=N,
                                                 **kwargs)
     init = lambda x: (x, jnp.zeros((x.shape[0],), dtype=int))
 
-    return kernel, init
+    def sampling_routine_fn(key, state, kernel_, n_steps, verbose, get_samples):
+        return aux_sampling_routine(key, state[0], state[1], kernel_, n_steps, verbose, get_samples)
+
+    return kernel, init, sampling_routine_fn
 
 
 def get_filter_csmc_kernel(ys, drift: Callable, diffusion: Callable, sigma, N, num, dts, style="guided", **kwargs):
@@ -155,49 +155,37 @@ def get_filter_csmc_kernel(ys, drift: Callable, diffusion: Callable, sigma, N, n
 
     if style == "guided":
 
-        # def M0_rvs(key, _):
-        #     """ Returns t0 distribution for pathspace not z-space """
-        #     x0 = sigma * jr.normal(key, (N + 1, num + 1, dx))
-        #     return x0
-        
         def M0_rvs(key, _):
-            e0 = sigma * jr.normal(key, (N + 1, dx))
-            return jnp.repeat(e0[:, None, :], num + 1, axis=1)
+            key1, key2 = jr.split(key)
+            u_00 = jnp.zeros((N+1, dx))
+            u_0 = br.simulate(key1, u_00, dts[0], num, N + 1) 
+            e_0 = sigma * jr.normal(key2, (N + 1, dx))
+            return (u_0, e_0)
 
-        def Mt_rvs(key, x_t_m_1, params):
-            y_t, t, dt = params
+        def Mt_rvs(key, z_t_m_1, params):
+            _, t, dt = params
+            _, e_t_m_1 = z_t_m_1
 
             key1, key2 = jr.split(key)
-            z_t0 = jnp.zeros((N + 1, dx))
-            z_t = br.simulate(key1, z_t0, dt, num, N + 1)  # exact brownian simulation
-            
-            e_ts = euler.euler(key2, drift, diffusion, x_t_m_1[:, -1], t, dt, 1, N + 1)
-            x = bridge.euler(diffusion, z_t, x_t_m_1[:, -1], e_ts[:, -1], t, dt)            
-            return x[:, 1:]  # remove duplicate endpoint
+            u_t0 = jnp.zeros((N + 1, dx))
+            u_t = br.simulate(key1, u_t0, dt, num, N + 1)
+            e_ts = euler.euler(key2, drift, diffusion, e_t_m_1, t, dt, 1, N + 1)
+            return (u_t, e_ts[:, -1])
 
-        
-        M0_logpdf = lambda x: norm.logpdf(x[-1], scale=sigma).sum()
-        M0_logpdf = jax.vmap(M0_logpdf)
-        
-        Mt_logpdf = lambda x_t_m_1, x_t, params: euler.logpdf(x_t[-1], x_t_m_1[-1], drift, diffusion, params[1], params[2])
-        Mt_logpdf = jax.vmap(Mt_logpdf, in_axes=(0, 0, None))
+        M0_logpdf = lambda z: norm.logpdf(z[1], loc=0.0, scale=sigma).sum(axis=-1)
+        Mt_logpdf = lambda z_t_m_1, z_t, params: jax.vmap(lambda ep, e: euler.logpdf(e, ep, drift, diffusion, params[1], params[2]))(z_t_m_1[1], z_t[1])
 
-        @jax.vmap
-        def Gamma_0(x):
-            """ Returns discrete weight for x0 """
-            e = x[-1]
-            obs_ll = jnp.sum(norm.logpdf(ys[0], loc=e))
-            prior_ll = jnp.sum(norm.logpdf(e, scale=sigma))
-            return obs_ll + prior_ll
-            # cov = sig @ sig.T
-            # chol_Q = jnp.linalg.cholesky(cov)
-            # return mvn_logpdf(ys[0], x, chol_Q, constant=False) + M0_logpdf(x[-1])
+        def Gamma_0(z):
+            _, e = z
+            return norm.logpdf(ys[0], loc=e).sum(axis=-1) + M0_logpdf(z)
 
-        @partial(jax.vmap, in_axes=(0, 0, None))
-        def Gamma_t(x_t_m_1, x_t, params):
+        def Gamma_t(z_t_m_1, z_t, params):
             y_t, t, dt = params
-            return log_potential(x_t, x_t_m_1, y_t, drift, diffusion, t, dt)
-
+            _, e_t_m_1 = z_t_m_1
+            u_t, e_t = z_t
+            x_t = bridge.to_path(diffusion, u_t, e_t_m_1, e_t, t, dt)
+            return log_potential(x_t, e_t_m_1, y_t, drift, diffusion, t, dt)
+        
     else:
         raise NotImplementedError(f"Unknown style: {style}, choose from 'guided'")
 
@@ -205,11 +193,14 @@ def get_filter_csmc_kernel(ys, drift: Callable, diffusion: Callable, sigma, N, n
     Mt = Mt_rvs, Mt_logpdf, (ys[1:], ts[1:], dts[1:])
     Gamma_t_plus_params = Gamma_t, (ys[1:], ts[1:], dts[1:])
 
-    kernel = lambda key, state, *_: csmc.forward_pass(key, state[0], state[1], M0, Gamma_0, Mt, Gamma_t_plus_params, N=N,
+    kernel = lambda key, state, *_: t_csmc.forward_pass(key, state[0], state[1], M0, Gamma_0, Mt, Gamma_t_plus_params, N=N,
                                                 **kwargs)
     init = lambda x: (x, jnp.zeros((x.shape[0],), dtype=int))
 
-    return kernel, init
+    def sampling_routine_fn(key, state, kernel_, n_steps, verbose, get_samples):
+        return aux_sampling_routine(key, state[0], state[1], kernel_, n_steps, verbose, get_samples)
+
+    return kernel, init, sampling_routine_fn
 
 
 

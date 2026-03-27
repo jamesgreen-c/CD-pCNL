@@ -73,9 +73,11 @@ def get_data(key: PRNGKey, phi: float, sigma: float, dim: int, dts: Array):
 
 
 
-# @partial(jnp.vectorize, signature="(n),(n),(n)->()", excluded=(3, 4, 5, 6))
-def log_potential(x, xp, y, drift: Callable, diffusion: Callable, t: Array, dt: Array):
-    e, ep = x[-1, None], xp[-1, None]
+
+
+@partial(jnp.vectorize, signature="(m,d),(d)->()", excluded=(2, 3, 4, 5, 6))
+def log_potential(x, ep, y, drift: Callable, diffusion: Callable, t: Array, dt: Array):
+    e = x[-1]
 
     def _cov(t, x):
         sig = diffusion(t, x) * jnp.eye(x.shape[0])
