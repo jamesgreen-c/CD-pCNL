@@ -8,11 +8,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import tqdm
 
-from experiments.lgssm.kernels import KernelType, get_filter_csmc_kernel
+from experiments.lgssm.kernels import KernelType, get_csmc_kernel
 from experiments.lgssm.model import get_data, get_dynamics
 from cd_ssm.utils.common import force_move, barker_move
 from cd_ssm.utils.kalman import sampling, filtering
-from cd_ssm.utils.resamplings import killing, multinomial, dynamic
+from cd_ssm.utils.resamplings import killing, multinomial
 
 # jax.config.update("jax_enable_x64", False)
 # jax.config.update("jax_platform_name", "cpu")
@@ -22,13 +22,14 @@ parser = argparse.ArgumentParser()
 
 parser.add_argument("--T", dest="T", type=int, default=10)
 parser.add_argument("--D", dest="D", type=int, default=1)
-parser.add_argument("--K", dest="K", type=int, default=3)
-parser.add_argument("--M", dest="M", type=int, default=1)
+parser.add_argument("--K", dest="K", type=int, default=1)
+parser.add_argument("--M", dest="M", type=int, default=5)
+
 parser.add_argument("--log-var", dest="log_var", type=float, default=0)
 parser.add_argument("--phi", dest="phi", type=float, default=0.8)
 
 parser.add_argument("--steps", type=int, default=100)
-parser.add_argument("--mesh-num", dest="mesh_num", type=int, default=3)
+parser.add_argument("--mesh-num", dest="mesh_num", type=int, default=100)
 
 parser.add_argument("--delta", dest="delta", type=float,
                     default=1.)
@@ -49,10 +50,6 @@ parser.add_argument("--N", dest="N", type=int, default=31)  # total number of pa
 parser.add_argument("--debug", action='store_true')
 parser.add_argument('--no-debug', dest='debug', action='store_false')
 parser.set_defaults(debug=False)
-
-parser.add_argument("--dynamic", action="store_true")
-parser.add_argument("--threshold", type=float, default=0.5)
-parser.set_defaults(dynamic=False)
 
 parser.add_argument("--verbose", action='store_true')
 parser.add_argument('--no-verbose', dest='verbose', action='store_false')
@@ -92,18 +89,11 @@ else:
     DELTA = args.delta
 
 if args.resampling == "killing":
-    resampling_func = killing
+    resampling_fn = killing
 elif args.resampling == "multinomial":
-    resampling_func = multinomial
+    resampling_fn = multinomial
 else:
     raise ValueError(f"Unknown resampling {args.resampling}")
-
-if args.dynamic:
-    assert args.threshold is not None, "If using dynamic sampling, please provide a threshold for the ESS"
-    def resampling_fn(key, weights, i, j, conditional):
-        return dynamic(resampling_func, args.threshold, key, weights, i, j, conditional)
-else:
-    resampling_fn = resampling_func
 
 if args.last_step == "forced":
     last_step_fn = force_move
@@ -124,44 +114,68 @@ def tic_fn(arr):
     return np.array(time_elapsed, dtype=arr.dtype), arr
 
 
-@(jax.jit if not args.debug else lambda x: x)
+# @(jax.jit if not args.debug else lambda x: x)
 def one_experiment(key):
     data_key, init_key, sample_key = jax.random.split(key, 3)
 
     true_xs, ys, As, chol_Qs, chol_P0 = get_data(data_key, PHI, SIGMA, args.D, DTs)
 
-    kernel_, init, _ = get_filter_csmc_kernel(
+    kernel_, init, _ = get_csmc_kernel(
         ys, DRIFT, DIFFUSION, SIGMA, N=args.N,
         num=args.mesh_num, dts=DTs,
         resampling_func=resampling_fn,
+        backward=args.backward,
+        ancestor_move_func=last_step_fn,
         style=args.style, 
         conditional=False
     )
     # kernel_ = jax.jit(kernel_)
 
-    As, _, _, _, _, xs = kernel_(sample_key, init(true_xs), None)
-    return As, true_xs, xs, ys
+    # We initialise at stationarity to compute ESJD for fully independent samples.
+    K, dim = ys.shape
+    m0 = jnp.zeros((dim,))
+    P0 = (chol_P0**2) * jnp.eye(dim)
+    Fs = As[:, None, None] * jnp.eye(dim)[None, :, :]            # (K - 1, D, D)
+    Qs = (chol_Qs**2)[:, None, None] * jnp.eye(dim)[None, :, :]  # (K - 1, D, D)
+    Hs = jnp.repeat(jnp.eye(dim)[None, :, :], K, axis=0)         # (K, D, D)
+    Rs = jnp.repeat(jnp.eye(dim)[None, :, :], K, axis=0)         # (K, D, D)
+    bs = jnp.zeros((K - 1, dim))
+    cs = jnp.zeros((K, dim))
 
+    fms, fPs, _ = filtering.filtering(ys, m0, P0, Fs[1:], Qs[1:], bs, Hs, Rs, cs)
+    smoothing_xs = sampling.sampling(init_key, fms, fPs, Fs[1:], Qs[1:], bs, args.M)
+
+    init_states = jax.vmap(init)(smoothing_xs)  # only uses shape information since conditional=False
+    sample_keys = jax.random.split(sample_key, args.M)
+
+    def smoothing_sample(k_, state):
+        xs, Bs, *_ = kernel_(k_, state, DELTA)
+        return xs, Bs
+
+    samples, Bs = jax.vmap(smoothing_sample)(sample_keys, init_states)
+    return samples, Bs, smoothing_xs, true_xs, ys
 
 
 true_xs_all = np.empty((args.K, args.steps, args.D))
-us_all = np.empty((args.K, args.M, args.steps, args.N+1, args.mesh_num + 1, args.D))
-es_all = np.empty((args.K, args.M, args.steps, args.N+1, args.D))
 ys_all = np.empty((args.K, args.steps, args.D))
-As_all = np.empty((args.K, args.steps-1, args.N+1,))
+us_all = np.empty((args.K, args.M, args.steps, args.mesh_num + 1, args.D))
+es_all = np.empty((args.K, args.M, args.steps, args.D))
+Bs_all = np.empty((args.K, args.M, args.steps,))
+s_ms_all =  np.empty((args.K, args.M, args.steps, args.D))
 
 for k, key_k in enumerate(tqdm.tqdm(EXPERIMENT_KEYS, desc="Experiment: ")):
-    As_k, true_xs_k, xs_k, ys_k = one_experiment(key_k)
+    xs_k, Bs_k, s_ms_k, true_xs_k, ys_k = one_experiment(key_k)
     us_k, es_k = xs_k
 
     true_xs_all[k, ...] = true_xs_k
     ys_all[k, ...] = ys_k
     us_all[k, ...] = us_k
     es_all[k, ...] = es_k
-    As_all[k, ...] = As_k
+    Bs_all[k, ...] = Bs_k
+    s_ms_all[k, ...] = s_ms_k
 
-if not os.path.exists("filter-results"):
-    os.mkdir("filter-results")
+if not os.path.exists("results"):
+    os.mkdir("results")
 
 experiment_name = "D={},N={},mesh-num={},steps={},seed={}"
 experiment_name = experiment_name.format(
@@ -172,7 +186,7 @@ experiment_name = experiment_name.format(
     args.seed
 )
 
-dirpath = f"filter-results/{experiment_name}"
+dirpath = f"results/{experiment_name}"
 if not os.path.exists(dirpath):
     os.mkdir(dirpath)
 
@@ -181,7 +195,8 @@ np.savez_compressed(
     datapath, 
     true_xs=true_xs_all,
     ys=ys_all,
-    As=As_all,
+    Bs=Bs_all,
+    s_ms=s_ms_all,
     us=us_all,
     es=es_all
 )

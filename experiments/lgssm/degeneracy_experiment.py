@@ -8,11 +8,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import tqdm
 
-from experiments.lgssm.kernels import KernelType, get_filter_csmc_kernel
+from experiments.lgssm.kernels import KernelType, get_csmc_kernel, get_filter_csmc_kernel
 from experiments.lgssm.model import get_data, get_dynamics
 from cd_ssm.utils.common import force_move, barker_move
 from cd_ssm.utils.kalman import sampling, filtering
-from cd_ssm.utils.resamplings import killing, multinomial, dynamic
+from cd_ssm.utils.resamplings import killing, multinomial
 
 # jax.config.update("jax_enable_x64", False)
 # jax.config.update("jax_platform_name", "cpu")
@@ -22,13 +22,16 @@ parser = argparse.ArgumentParser()
 
 parser.add_argument("--T", dest="T", type=int, default=10)
 parser.add_argument("--D", dest="D", type=int, default=1)
-parser.add_argument("--K", dest="K", type=int, default=3)
-parser.add_argument("--M", dest="M", type=int, default=1)
+parser.add_argument("--K", dest="K", type=int, default=1)
+parser.add_argument("--M", dest="M", type=int, default=5)
+
 parser.add_argument("--log-var", dest="log_var", type=float, default=0)
 parser.add_argument("--phi", dest="phi", type=float, default=0.8)
 
 parser.add_argument("--steps", type=int, default=100)
-parser.add_argument("--mesh-num", dest="mesh_num", type=int, default=3)
+parser.add_argument("--mesh-num", dest="mesh_num", type=int, default=100)
+
+parser.add_argument("--n-samples", dest="n_samples", type=int, default=250)
 
 parser.add_argument("--delta", dest="delta", type=float,
                     default=1.)
@@ -49,10 +52,6 @@ parser.add_argument("--N", dest="N", type=int, default=31)  # total number of pa
 parser.add_argument("--debug", action='store_true')
 parser.add_argument('--no-debug', dest='debug', action='store_false')
 parser.set_defaults(debug=False)
-
-parser.add_argument("--dynamic", action="store_true")
-parser.add_argument("--threshold", type=float, default=0.5)
-parser.set_defaults(dynamic=False)
 
 parser.add_argument("--verbose", action='store_true')
 parser.add_argument('--no-verbose', dest='verbose', action='store_false')
@@ -92,18 +91,11 @@ else:
     DELTA = args.delta
 
 if args.resampling == "killing":
-    resampling_func = killing
+    resampling_fn = killing
 elif args.resampling == "multinomial":
-    resampling_func = multinomial
+    resampling_fn = multinomial
 else:
     raise ValueError(f"Unknown resampling {args.resampling}")
-
-if args.dynamic:
-    assert args.threshold is not None, "If using dynamic sampling, please provide a threshold for the ESS"
-    def resampling_fn(key, weights, i, j, conditional):
-        return dynamic(resampling_func, args.threshold, key, weights, i, j, conditional)
-else:
-    resampling_fn = resampling_func
 
 if args.last_step == "forced":
     last_step_fn = force_move
@@ -126,42 +118,91 @@ def tic_fn(arr):
 
 @(jax.jit if not args.debug else lambda x: x)
 def one_experiment(key):
+    """Compare geanology tracing to backward sampling"""
     data_key, init_key, sample_key = jax.random.split(key, 3)
 
-    true_xs, ys, As, chol_Qs, chol_P0 = get_data(data_key, PHI, SIGMA, args.D, DTs)
+    true_xs, ys, Fs, chol_Qs, chol_P0 = get_data(data_key, PHI, SIGMA, args.D, DTs)
 
-    kernel_, init, _ = get_filter_csmc_kernel(
+    kernel, init, sampling_loop = kernel_type.kernel_maker(ys, DRIFT, DIFFUSION, SIGMA, N=args.N,
+                                                            num=args.mesh_num, dts=DTs,
+                                                            resampling_func=resampling_fn,
+                                                            backward=True,  # True -> Backward Sampling
+                                                            ancestor_move_func=last_step_fn,
+                                                            style=args.style)
+
+    kernel = jax.jit(kernel)
+    sampling_loop = jax.jit(sampling_loop, static_argnums=(2, 3, 4, 5))
+
+    # initialise with genealogy tracking
+    csmc_kernel , csmc_init, *_ = get_csmc_kernel(
         ys, DRIFT, DIFFUSION, SIGMA, N=args.N,
         num=args.mesh_num, dts=DTs,
         resampling_func=resampling_fn,
+        backward=False,   # False -> genealogy tracing
+        ancestor_move_func=last_step_fn,
         style=args.style, 
         conditional=False
     )
-    # kernel_ = jax.jit(kernel_)
+    init_xs, init_As, *_ = csmc_kernel(init_key, csmc_init(true_xs), None)
+    init_state = init(init_xs)
 
-    As, _, _, _, _, xs = kernel_(sample_key, init(true_xs), None)
-    return As, true_xs, xs, ys
+    delta_kernel = lambda k_, s: kernel(k_, s, DELTA)
+
+    def get_samples(sample_key_op, init_state_op, all_samples, n_samples):
+        return sampling_loop(sample_key_op, init_state_op, delta_kernel, n_samples,
+                               args.verbose, all_samples)
+    
+    sample_keys = jax.random.split(sample_key, args.M)
+    sample_xs, sample_bs, sample_log_ws, final_pct = jax.vmap(get_samples, in_axes=[0, None, None, None], out_axes=1)(sample_keys, init_state, True, args.n_samples)
+    
+    return init_As, sample_bs
+ 
+    # get_kernel = lambda backward: get_csmc_kernel(
+    #     ys, DRIFT, DIFFUSION, SIGMA, N=args.N,
+    #     num=args.mesh_num, dts=DTs,
+    #     resampling_func=resampling_fn,
+    #     backward=backward,
+    #     ancestor_move_func=last_step_fn,
+    #     style=args.style, 
+    #     conditional=False
+    # )
+
+    # f_kernel_, init = get_kernel(False)
+    # s_kernel_, _ = get_kernel(True)
+    # f_kernel_ = jax.jit(f_kernel_)
+    # s_kernel_ = jax.jit(s_kernel_)
+
+    # init_state = init(true_xs)  # only uses shape information since conditional=False
+    # sample_keys = jax.random.split(sample_key, args.M)
+
+    # def get_samples(k_):
+    #     f_xs, As, *_ = f_kernel_(k_, init_state, DELTA) 
+    #     s_xs, Bs, *_ = s_kernel_(k_, init_state, DELTA)   # use the same key
+    #     return f_xs, As, s_xs, Bs
+
+    # f_xs, As, s_xs, Bs = jax.vmap(get_samples)(sample_keys)
+    # return f_xs, As, s_xs, Bs, true_xs, ys
 
 
-
-true_xs_all = np.empty((args.K, args.steps, args.D))
-us_all = np.empty((args.K, args.M, args.steps, args.N+1, args.mesh_num + 1, args.D))
-es_all = np.empty((args.K, args.M, args.steps, args.N+1, args.D))
-ys_all = np.empty((args.K, args.steps, args.D))
-As_all = np.empty((args.K, args.steps-1, args.N+1,))
+# true_xs_all = np.empty((args.K, args.steps, args.D))
+# ys_all = np.empty((args.K, args.steps, args.D))
+# f_xs_all = np.empty((args.K, args.M, args.steps, args.mesh_num, args.D))
+# s_xs_all = np.empty((args.K, args.M, args.steps, args.mesh_num, args.D))
+As_all = np.empty((args.K, args.M, args.steps,))
+Bs_all = np.empty((args.K, args.n_samples, args.M, args.steps,))
 
 for k, key_k in enumerate(tqdm.tqdm(EXPERIMENT_KEYS, desc="Experiment: ")):
-    As_k, true_xs_k, xs_k, ys_k = one_experiment(key_k)
-    us_k, es_k = xs_k
+    As_k, Bs_k = one_experiment(key_k)
 
-    true_xs_all[k, ...] = true_xs_k
-    ys_all[k, ...] = ys_k
-    us_all[k, ...] = us_k
-    es_all[k, ...] = es_k
+    # true_xs_all[k, ...] = true_xs_k
+    # ys_all[k, ...] = ys_k
+    # f_xs_all[k, ...] = f_xs_k
+    # s_xs_all[k, ...] = s_xs_k
     As_all[k, ...] = As_k
+    Bs_all[k, ...] = Bs_k
 
-if not os.path.exists("filter-results"):
-    os.mkdir("filter-results")
+if not os.path.exists("degeneracy-results"):
+    os.mkdir("degeneracy-results")
 
 experiment_name = "D={},N={},mesh-num={},steps={},seed={}"
 experiment_name = experiment_name.format(
@@ -172,16 +213,17 @@ experiment_name = experiment_name.format(
     args.seed
 )
 
-dirpath = f"filter-results/{experiment_name}"
+dirpath = f"degeneracy-results/{experiment_name}"
 if not os.path.exists(dirpath):
     os.mkdir(dirpath)
 
 datapath = f"{dirpath}/data.npz"
 np.savez_compressed(
     datapath, 
-    true_xs=true_xs_all,
-    ys=ys_all,
+    # true_xs=true_xs_all,
+    # ys=ys_all,
+    # f_xs=f_xs_all,
+    # s_xs=s_xs_all,
     As=As_all,
-    us=us_all,
-    es=es_all
+    Bs=Bs_all,
 )

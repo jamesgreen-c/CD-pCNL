@@ -115,7 +115,7 @@ def forward_pass(key: PRNGKey, x_star: Array, b_star: Array, M_0: tuple[Callable
     ###############################
     #        HOUSEKEEPING         #
     ###############################
-    T, _d_x = x_star.shape
+    T = x_star.shape[0]
     key_init, key_loop, key_backward = jax.random.split(key, 3)
     # Unpack Gamma_function
     Gamma_t, Gamma_params = Gamma_t if isinstance(Gamma_t, tuple) else (Gamma_t, None)
