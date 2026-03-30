@@ -12,6 +12,10 @@ results/
 remote-results/
 if-results/
 filter-results/
+degeneracy-results/
+
+# old file storage
+deprecated/
 
 # Distribution / packaging
 .Python
