@@ -118,9 +118,9 @@ def tic_fn(arr):
 def one_experiment(key):
     data_key, init_key, sample_key = jax.random.split(key, 3)
 
-    true_xs, ys, As, chol_Qs, chol_P0 = get_data(data_key, PHI, SIGMA, args.D, DTs)
+    true_xs, ys, *_ = get_data(data_key, PHI, SIGMA, args.D, DTs, args.mesh_num)
 
-    kernel_, init, _ = get_csmc_kernel(
+    csmc_kernel, csmc_init, _ = get_csmc_kernel(
         ys, DRIFT, DIFFUSION, SIGMA, N=args.N,
         num=args.mesh_num, dts=DTs,
         resampling_func=resampling_fn,
@@ -129,50 +129,35 @@ def one_experiment(key):
         style=args.style, 
         conditional=False
     )
-    # kernel_ = jax.jit(kernel_)
 
-    # We initialise at stationarity to compute ESJD for fully independent samples.
-    K, dim = ys.shape
-    m0 = jnp.zeros((dim,))
-    P0 = (chol_P0**2) * jnp.eye(dim)
-    Fs = As[:, None, None] * jnp.eye(dim)[None, :, :]            # (K - 1, D, D)
-    Qs = (chol_Qs**2)[:, None, None] * jnp.eye(dim)[None, :, :]  # (K - 1, D, D)
-    Hs = jnp.repeat(jnp.eye(dim)[None, :, :], K, axis=0)         # (K, D, D)
-    Rs = jnp.repeat(jnp.eye(dim)[None, :, :], K, axis=0)         # (K, D, D)
-    bs = jnp.zeros((K - 1, dim))
-    cs = jnp.zeros((K, dim))
+    init_xs, *_ = csmc_kernel(init_key, csmc_init(true_xs), None)
+    init_state = init(init_xs)
 
-    fms, fPs, _ = filtering.filtering(ys, m0, P0, Fs[1:], Qs[1:], bs, Hs, Rs, cs)
-    smoothing_xs = sampling.sampling(init_key, fms, fPs, Fs[1:], Qs[1:], bs, args.M)
+    kernel_, init, _ = kernel_type.kernel_maker(
+        ys, DRIFT, DIFFUSION, SIGMA, N=args.N,
+        num=args.mesh_num, dts=DTs,
+        resampling_func=resampling_fn,
+        backward=args.backward,
+        ancestor_move_func=last_step_fn,
+        style=args.style, 
+        conditional=True
+    )
+    kernel_ = jax.jit(kernel_)
 
-    init_states = jax.vmap(init)(smoothing_xs)  # only uses shape information since conditional=False
+    def esjd(k_):
+        xs, *_ = init_state
+        next_xs, *_ = kernel_(k_, init_state, DELTA)
+        return jnp.sum((xs - next_xs) ** 2, -1)
+
     sample_keys = jax.random.split(sample_key, args.M)
-
-    def smoothing_sample(k_, state):
-        xs, Bs, *_ = kernel_(k_, state, DELTA)
-        return xs, Bs
-
-    samples, Bs = jax.vmap(smoothing_sample)(sample_keys, init_states)
-    return samples, Bs, smoothing_xs, true_xs, ys
+    esjd_vals = jax.vmap(esjd)(sample_keys)
+    return esjd_vals.mean(0)
 
 
-true_xs_all = np.empty((args.K, args.steps, args.D))
-ys_all = np.empty((args.K, args.steps, args.D))
-us_all = np.empty((args.K, args.M, args.steps, args.mesh_num + 1, args.D))
-es_all = np.empty((args.K, args.M, args.steps, args.D))
-Bs_all = np.empty((args.K, args.M, args.steps,))
-s_ms_all =  np.empty((args.K, args.M, args.steps, args.D))
-
+esjd_all = np.empty((args.K, args.T))
 for k, key_k in enumerate(tqdm.tqdm(EXPERIMENT_KEYS, desc="Experiment: ")):
-    xs_k, Bs_k, s_ms_k, true_xs_k, ys_k = one_experiment(key_k)
-    us_k, es_k = xs_k
-
-    true_xs_all[k, ...] = true_xs_k
-    ys_all[k, ...] = ys_k
-    us_all[k, ...] = us_k
-    es_all[k, ...] = es_k
-    Bs_all[k, ...] = Bs_k
-    s_ms_all[k, ...] = s_ms_k
+    esjd_k = one_experiment(key_k)
+    esjd_all[k] = esjd_k
 
 if not os.path.exists("results"):
     os.mkdir("results")
@@ -193,10 +178,5 @@ if not os.path.exists(dirpath):
 datapath = f"{dirpath}/data.npz"
 np.savez_compressed(
     datapath, 
-    true_xs=true_xs_all,
-    ys=ys_all,
-    Bs=Bs_all,
-    s_ms=s_ms_all,
-    us=us_all,
-    es=es_all
+    esjd=esjd_all,
 )

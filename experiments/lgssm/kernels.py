@@ -16,6 +16,7 @@ from cd_ssm.utils.mcmc_utils import aux_sampling_routine
 from cd_ssm import euler
 from cd_ssm import brownian as br
 from cd_ssm import t_csmc
+from cd_ssm import t_cd_pcn
 from cd_ssm import bridge
 
 
@@ -116,7 +117,7 @@ def get_csmc_kernel(ys, drift: Callable, diffusion: Callable, sigma, N, num, dts
 
     kernel = lambda key, state, *_: t_csmc.kernel(key, state[0], state[1], M0, Gamma_0, Mt, Gamma_t_plus_params, N=N,
                                                 **kwargs)
-    init = lambda x: (x, jnp.zeros((x.shape[0],), dtype=int))
+    init = lambda x: (x, jnp.zeros((T,), dtype=int))
 
     def sampling_routine_fn(key, state, kernel_, n_steps, verbose, get_samples):
         return aux_sampling_routine(key, state[0], state[1], kernel_, n_steps, verbose, get_samples)
@@ -195,7 +196,7 @@ def get_filter_csmc_kernel(ys, drift: Callable, diffusion: Callable, sigma, N, n
 
     kernel = lambda key, state, *_: t_csmc.forward_pass(key, state[0], state[1], M0, Gamma_0, Mt, Gamma_t_plus_params, N=N,
                                                 **kwargs)
-    init = lambda x: (x, jnp.zeros((x.shape[0],), dtype=int))
+    init = lambda x: (x, jnp.zeros((T,), dtype=int))
 
     def sampling_routine_fn(key, state, kernel_, n_steps, verbose, get_samples):
         return aux_sampling_routine(key, state[0], state[1], kernel_, n_steps, verbose, get_samples)
@@ -204,6 +205,59 @@ def get_filter_csmc_kernel(ys, drift: Callable, diffusion: Callable, sigma, N, n
 
 
 
-def get_pcn_csmc_kernel(ys, sigma, N, style="filtering", stop_gradient=False, **kwargs):
-    pass
+def get_pcn_csmc_kernel(ys, drift: Callable, diffusion: Callable, sigma, N, num, dts, style="na", **kwargs):
+    """
+    Kernel constructor for CD-pCN kernel.  
+
+    Parameters
+    ----------
+    ys:         The observations at the discrete times. Shape (T, d)
+    drift:      The drift function. Should take (t, x) as args
+    diffusion:  The diffusion function. Should take (t, x) as args
+    sigma:      The standard deviation of the initial Gaussian prior
+    N:          The number of particles, excluding the retained reference path
+    num:        The number of mesh steps used within each observation interval
+    dts:        The time increments between observations. Shape (T,)
+    style:      The proposal style to use. Currently only "guided" is implemented
+    kwargs:     Additional keyword arguments passed to the underlying cSMC kernel,
+                such as resampling and ancestor move functions
+
+    Returns
+    ----------
+    kernel:     The CD-pCN kernel. Takes a PRNG key and a state (reference path, reference ancestors),
+                runs the forward pass and backward pass, and returns the updated particle genealogy
+    init:       Initialiser for the CD-pCN state. Takes a reference path and returns the pair
+                (reference path, zero ancestor indices)
+    """
+    T, dx = ys.shape
+    ts = jnp.concatenate([jnp.array([0.0]), jnp.cumsum(dts)])[:-1]
+
+    if style == "na":
+
+        M0_logpdf = lambda z: norm.logpdf(z[1], loc=0.0, scale=sigma).sum(axis=-1)
+        Mt_logpdf = lambda z_t_m_1, z_t, params: jax.vmap(lambda ep, e: euler.logpdf(e, ep, drift, diffusion, params[1], params[2]))(z_t_m_1[1], z_t[1])
+
+        def Gamma_0(z):
+            _, e = z
+            return norm.logpdf(ys[0], loc=e).sum(axis=-1) + M0_logpdf(z)
+
+        def Gamma_t(z_t_m_1, z_t, params):
+            y_t, t, dt = params
+            _, e_t_m_1 = z_t_m_1
+            u_t, e_t = z_t
+            x_t = bridge.to_path(diffusion, u_t, e_t_m_1, e_t, t, dt)
+            return log_potential(x_t, e_t_m_1, y_t, drift, diffusion, t, dt) + Mt_logpdf(z_t_m_1, z_t, params)
+        
+    else:
+        raise NotImplementedError(f"Unknown style: {style}, choose from 'guided'")
+
+    Gamma_t_plus_params = Gamma_t, (ys[1:], ts[1:], dts[1:])
+    kernel = lambda key, state, *_: t_cd_pcn.kernel(key, state[0], state[1], Gamma_0, Gamma_t_plus_params, N=N,
+                                                **kwargs)
+    init = lambda x: (x, jnp.zeros((T,), dtype=int))
+
+    def sampling_routine_fn(key, state, kernel_, n_steps, verbose, get_samples):
+        return aux_sampling_routine(key, state[0], state[1], kernel_, n_steps, verbose, get_samples)
+
+    return kernel, init, sampling_routine_fn
 
