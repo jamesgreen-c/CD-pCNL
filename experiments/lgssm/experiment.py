@@ -4,6 +4,8 @@ import time
 
 import jax
 import jax.numpy as jnp
+from jax.tree_util import tree_map
+
 import matplotlib.pyplot as plt
 import numpy as np
 import tqdm
@@ -88,6 +90,8 @@ elif args.delta_arg == "DT" or args.delta_arg == "TD":
 else:
     DELTA = args.delta
 
+RHO = 0.5
+
 if args.resampling == "killing":
     resampling_fn = killing
 elif args.resampling == "multinomial":
@@ -103,6 +107,8 @@ else:
     raise ValueError(f"Unknown last step {args.last_step}")
 
 kernel_type = KernelType(args.kernel)
+DELTA = kernel_type.shape_delta(DELTA, args.steps)
+
 SIGMA = 10 ** (args.log_var / 2)
 PHI = args.phi
 DTs = jnp.repeat(args.T / args.steps, args.steps)
@@ -124,14 +130,13 @@ def one_experiment(key):
         ys, DRIFT, DIFFUSION, SIGMA, N=args.N,
         num=args.mesh_num, dts=DTs,
         resampling_func=resampling_fn,
-        backward=args.backward,
+        backward=True,
         ancestor_move_func=last_step_fn,
-        style=args.style, 
+        style="guided", 
         conditional=False
     )
 
     init_xs, *_ = csmc_kernel(init_key, csmc_init(true_xs), None)
-    init_state = init(init_xs)
 
     kernel_, init, _ = kernel_type.kernel_maker(
         ys, DRIFT, DIFFUSION, SIGMA, N=args.N,
@@ -142,22 +147,53 @@ def one_experiment(key):
         style=args.style, 
         conditional=True
     )
+
     kernel_ = jax.jit(kernel_)
+    init_state = init(init_xs)
 
     def esjd(k_):
         xs, *_ = init_state
-        next_xs, *_ = kernel_(k_, init_state, DELTA)
-        return jnp.sum((xs - next_xs) ** 2, -1)
+        next_xs, *_ = kernel_(k_, init_state, DELTA, RHO)
+        _esjds = tree_map(lambda _xp, _x: jnp.sum((_xp - _x) ** 2, axis=jnp.arange(1, _xp.ndim)), xs, next_xs)
+        return _esjds, next_xs
 
     sample_keys = jax.random.split(sample_key, args.M)
-    esjd_vals = jax.vmap(esjd)(sample_keys)
-    return esjd_vals.mean(0)
 
+    (esjd_vals, samples) = jax.vmap(esjd)(sample_keys)
+    esjd_means = tree_map(lambda _sjd: _sjd.mean(0), esjd_vals)
+    return esjd_means, samples, true_xs, ys, init_xs
 
-esjd_all = np.empty((args.K, args.T))
+us_all = np.empty((args.K, args.M, args.steps, args.mesh_num + 1, args.D))
+es_all = np.empty((args.K, args.M, args.steps, args.D))
+true_us_all = np.empty((args.K, args.steps, args.mesh_num + 1, args.D))
+true_es_all = np.empty((args.K, args.steps, args.D))
+ys_all = np.empty((args.K, args.steps, args.D))
+init_us_all = np.empty((args.K, args.steps, args.mesh_num + 1, args.D))
+init_es_all = np.empty((args.K, args.steps, args.D))
+esjd_us = np.empty((args.K, args.steps))
+esjd_es = np.empty((args.K, args.steps))
+
 for k, key_k in enumerate(tqdm.tqdm(EXPERIMENT_KEYS, desc="Experiment: ")):
-    esjd_k = one_experiment(key_k)
-    esjd_all[k] = esjd_k
+    esjd_k, samples_k, true_xs_k, ys_k, init_xs_k = one_experiment(key_k)
+    us_k, es_k = samples_k
+    esjd_us_k, esjd_es_k = esjd_k
+    true_us_k, true_es_k = true_xs_k
+    init_us_k, init_es_k = init_xs_k
+    # print(f"True us shape: {true_us_k.shape}")
+    # print(f"True es shape: {true_es_k.shape}")
+    # print(f"Ys shape: {ys_k.shape}")
+    # print(f"Init us shape: {init_us_k.shape}")
+    # print(f"Init es shape: {init_es_k.shape}")
+
+    us_all[k] = us_k
+    es_all[k] = es_k
+    true_us_all[k] = true_us_k
+    true_es_all[k] = true_es_k
+    ys_all[k] = ys_k
+    init_us_all[k] = init_us_k
+    init_es_all[k] = init_es_k
+    esjd_us[k] = esjd_us_k
+    esjd_es[k] = esjd_es_k
 
 if not os.path.exists("results"):
     os.mkdir("results")
@@ -178,5 +214,14 @@ if not os.path.exists(dirpath):
 datapath = f"{dirpath}/data.npz"
 np.savez_compressed(
     datapath, 
-    esjd=esjd_all,
+    esjd_us=esjd_us,
+    esjd_es=esjd_es,
+    us=us_all,
+    es=es_all,
+    true_us=true_us_all,
+    true_es=true_es_all,
+    ys=ys_all,
+    init_us=init_us_all,
+    init_es=init_es_all
 )
+

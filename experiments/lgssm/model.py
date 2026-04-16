@@ -73,6 +73,7 @@ def get_data(
     
     w_keys = jax.random.split(wiener_key, K)
     us = jax.vmap(lambda _k, _dt: brownian.simulate(_k, jnp.zeros((dim, )), _dt, num, 1))(w_keys, dts)
+    us = jnp.swapaxes(us, -2, -1)
 
     eps_es, eps_ys = jax.random.normal(sampling_key, (2, K, dim))
     def body(e_k, inps):
