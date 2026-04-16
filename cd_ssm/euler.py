@@ -1,4 +1,5 @@
 from typing import Callable
+from functools import partial
 
 from chex import Array, PRNGKey
 import jax.random as jr
@@ -52,6 +53,7 @@ def euler(
     return xs
 
 
+@partial(jnp.vectorize, signature="(d),(d),(),()->()", excluded=(2, 3))
 def logpdf(x, xp, drift: Callable, diffusion: Callable, t: Array, dt: Array):
     
     def _cov(t, x):

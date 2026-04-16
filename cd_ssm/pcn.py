@@ -2,10 +2,10 @@
 TODO:
     1. Write out the pcn langevin proposal kernel
 """
+from functools import partial
 
 from chex import Array, PRNGKey
 
-import jax
 import jax.numpy as jnp
 from jax.scipy.stats import norm
 
@@ -36,13 +36,14 @@ def propose(
     -------
     x:   Array (N, mesh, D)
     """
-    mesh, D = xp.shape
+    mesh, D = xp.shape[-2:]
 
     w0 = jnp.zeros((N, D))
     w = brownian.simulate(key, w0, dt, mesh - 1, N)
     return rho * xp + jnp.sqrt(1 - jnp.square(rho)) * w
 
 
+@partial(jnp.vectorize, signature="(m,d),(m,d),(),()->()")
 def logpdf(
         xp: Array,
         x: Array,
@@ -66,7 +67,7 @@ def logpdf(
     dxp = xp[1:] - xp[:-1]   # (mesh-1, D)
     dx  = x[1:]  - x[:-1]    # (mesh-1, D)
 
-    mesh, D = xp.shape
+    mesh, D = xp.shape[-2:]
     subdt = dt / (mesh - 1)
     scale = jnp.sqrt((1.0 - rho**2) * subdt)
 
