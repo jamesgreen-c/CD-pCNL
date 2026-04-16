@@ -95,7 +95,8 @@ def get_csmc_kernel(ys, drift: Callable, diffusion: Callable, sigma, N, num, dts
             return (u_t, e_ts[:, -1])
 
         M0_logpdf = lambda z: norm.logpdf(z[1], loc=0.0, scale=sigma).sum(axis=-1)
-        Mt_logpdf = lambda z_t_m_1, z_t, params: jax.vmap(lambda ep, e: euler.logpdf(e, ep, drift, diffusion, params[1], params[2]))(z_t_m_1[1], z_t[1])
+        Mt_logpdf = lambda z_t_m_1, z_t, params: euler.logpdf(z_t_m_1[1], z_t[1], drift, diffusion, params[1], params[2])
+        # Mt_logpdf = lambda z_t_m_1, z_t, params: jax.vmap(lambda ep, e: euler.logpdf(e, ep, drift, diffusion, params[1], params[2]))(z_t_m_1[1], z_t[1])
 
         def Gamma_0(z):
             _, e = z
@@ -229,13 +230,14 @@ def get_pcn_csmc_kernel(ys, drift: Callable, diffusion: Callable, sigma, N, num,
     init:       Initialiser for the CD-pCN state. Takes a reference path and returns the pair
                 (reference path, zero ancestor indices)
     """
+    kwargs.pop("conditional")
     T, dx = ys.shape
     ts = jnp.concatenate([jnp.array([0.0]), jnp.cumsum(dts)])[:-1]
 
     if style == "na":
 
         M0_logpdf = lambda z: norm.logpdf(z[1], loc=0.0, scale=sigma).sum(axis=-1)
-        Mt_logpdf = lambda z_t_m_1, z_t, params: jax.vmap(lambda ep, e: euler.logpdf(e, ep, drift, diffusion, params[1], params[2]))(z_t_m_1[1], z_t[1])
+        Mt_logpdf = lambda z_t_m_1, z_t, params: euler.logpdf(z_t_m_1[1], z_t[1], drift, diffusion, params[1], params[2])
 
         def Gamma_0(z):
             _, e = z
@@ -249,11 +251,14 @@ def get_pcn_csmc_kernel(ys, drift: Callable, diffusion: Callable, sigma, N, num,
             return log_potential(x_t, e_t_m_1, y_t, drift, diffusion, t, dt) + Mt_logpdf(z_t_m_1, z_t, params)
         
     else:
-        raise NotImplementedError(f"Unknown style: {style}, choose from 'guided'")
+        raise NotImplementedError(f"Unknown style: {style}, choose from: 'na', TODO - 'langevin")
 
+    Gamma_0_plus_params = Gamma_0, (ys[0], ts[0], dts[0])
     Gamma_t_plus_params = Gamma_t, (ys[1:], ts[1:], dts[1:])
-    kernel = lambda key, state, *_: t_cd_pcn.kernel(key, state[0], state[1], Gamma_0, Gamma_t_plus_params, N=N,
-                                                **kwargs)
+    kernel = lambda key, state, delta, rho: t_cd_pcn.kernel(key, state[0], state[1], Gamma_0_plus_params, Gamma_t_plus_params, 
+                                                            delta, rho,
+                                                            N=N,
+                                                            **kwargs)
     init = lambda x: (x, jnp.zeros((T,), dtype=int))
 
     def sampling_routine_fn(key, state, kernel_, n_steps, verbose, get_samples):
