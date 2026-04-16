@@ -16,7 +16,7 @@ from chex import Array, PRNGKey
 from jax import numpy as jnp
 from jax.tree_util import tree_map, tree_reduce
 
-from cd_ssm.csmc import backward_sampling_pass, backward_scanning_pass
+from cd_ssm.t_csmc import backward_sampling_pass, backward_scanning_pass
 from cd_ssm.utils.resamplings import normalize
 from cd_ssm import pcn
 
@@ -25,7 +25,7 @@ def kernel(
     key: PRNGKey,
     x_star: Array,
     b_star: Array,
-    Gamma_0: Callable,
+    Gamma_0: Union[Callable, tuple[Callable, Any]],
     Gamma_t: Union[Callable, tuple[Callable, Any]],
     ells: Array,
     rho: Array,
@@ -65,23 +65,26 @@ def kernel(
 
     keys = jax.random.split(key, T + 2)
     key_e, key_u, key_backward, keys_resampling = keys[0], keys[1], keys[2], keys[3:]
-    key_aux_e, key_proposals_e = jax.random.split(key_e)
-    key_aux_u, key_proposals_u = jax.random.split(key_u)
+    key_aux_e, key_proposals_e = jax.random.split(key_e)    
+
+    keys_u = jax.random.split(key_u, 2*T)
+    keys_proposals_u, keys_aux_u = keys_u[:T], keys_u[T:]
 
     # Unpack Gamma function
+    Gamma_0, Gamma__0_params = Gamma_0 if isinstance(Gamma_0, tuple) else (Gamma_0, None)
     Gamma_t, Gamma_params = Gamma_t if isinstance(Gamma_t, tuple) else (Gamma_t, None)
 
     ###########################################
     #       Modified weight functions         #
     ###########################################
-    vmapped_pcn_logpdf = jax.vmap(lambda _up, _u, _rho, _dt: pcn.logpdf(_up, _u, _rho, _dt), in_axes=(None, 0, None, None))
     def Gamma_t_tilde(x_t_m_1, x_t, params):
         u_star_t, aux_u_t, original_params_t = params
         dt = original_params_t[-1]
         u_t, _ = x_t
 
-        val = Gamma_t(x_t_m_1, x_t, original_params_t)        
-        val += pcn.logpdf(u_star_t, aux_u_t, rho, dt) - vmapped_pcn_logpdf(aux_u_t, u_t, rho, dt)
+        val = Gamma_t(x_t_m_1, x_t, original_params_t)
+        val += pcn.logpdf(u_star_t, aux_u_t, rho, dt)
+        val += pcn.logpdf(aux_u_t, u_t, rho, dt)
         return val
     
     ########################################
@@ -95,8 +98,16 @@ def kernel(
     es = aux_es[:, None, :] + aux_e_std_devs[:, None, None] * eps_es                         # e_t = aux_e_t + N(0, 0.5 * ell_t * I)
 
     # auxiliary Wiener proposals
-    aux_us = pcn.propose(key_aux_u, u_star, rho, Gamma_params[-1], 1)                        # aux_u_t = rho*u_t + sqrt(1 - rho^2) * W_t()
-    us = pcn.propose(key_proposals_u, aux_us, rho, Gamma_params[-1], N + 1)                  # u_t = rho*aux_u_t + sqrt(1 - rho^2) * W_t()
+    dt_0, dts = Gamma__0_params[-1], Gamma_params[-1]
+    dts = jnp.insert(dts, 0, dt_0, axis=0)
+
+    vmapped_pcn_propose = jax.vmap(pcn.propose, in_axes=(0, 0, None, 0, None))
+    aux_us = vmapped_pcn_propose(keys_aux_u, u_star, rho, dts, 1)                       # aux_u_t = rho*u_t + sqrt(1 - rho^2) * W_t()
+    us = vmapped_pcn_propose(keys_proposals_u, aux_us, rho, dts, N + 1)                  # u_t = rho*aux_u_t + sqrt(1 - rho^2) * W_t()
+
+    # print("aux_us shape: ", aux_us.shape)
+    # print("u_star shape: ", u_star.shape)
+    # print("us shape: ", us.shape)
 
     # Replace the retained particle with the reference trajectory at each time t
     xs = (us, es)
@@ -138,7 +149,7 @@ def kernel(
         return next_carry, save
 
     # Run forward cSMC
-    Gamma_tilde_params = u_star, aux_us, Gamma_params
+    Gamma_tilde_params = u_star[1:], aux_us[1:], Gamma_params
     inputs = (Gamma_tilde_params, tree_map(lambda x: x[1:], xs), b_star[:-1], b_star[1:], keys_resampling,)
     _, (log_ws, As) = jax.lax.scan(body,
                                   (w0, x0),
