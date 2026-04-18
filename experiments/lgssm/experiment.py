@@ -29,6 +29,7 @@ parser.add_argument("--M", dest="M", type=int, default=5)
 
 parser.add_argument("--log-var", dest="log_var", type=float, default=0)
 parser.add_argument("--phi", dest="phi", type=float, default=0.8)
+parser.add_argument("--rho", dest="rho", type=float, default=0.5)
 
 parser.add_argument("--steps", type=int, default=100)
 parser.add_argument("--mesh-num", dest="mesh_num", type=int, default=100)
@@ -90,7 +91,7 @@ elif args.delta_arg == "DT" or args.delta_arg == "TD":
 else:
     DELTA = args.delta
 
-RHO = 0.5
+RHO = args.rho
 
 if args.resampling == "killing":
     resampling_fn = killing
