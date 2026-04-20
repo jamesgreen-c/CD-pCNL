@@ -70,4 +70,4 @@ for j in indices:
     exec_str = "python3 experiment.py --kernel {} --style {} --D {} --T {} --steps {} --mesh-num {} --rho {} --N {}"
     exec_str = exec_str.format(kernel.value, style, D, T, steps, mesh, rho, args.N)
     print("\nExecuting:", ctext(exec_str, "green"))
-    # os.system(exec_str)
+    os.system(exec_str)
