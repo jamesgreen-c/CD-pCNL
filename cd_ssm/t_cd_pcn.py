@@ -1,13 +1,5 @@
 """
 Implements the CD-PCN kernel.
-
-# TODO
-# 1. Write the updates with JAX pytrees for tuples - DONE
-# 2. Generate all pcn and rw auxiliary and particle proposals as in the file below before any CSMC ran
-# 3. Take the Gamma function and write a Gamma_prime function that adds the necessary correction term at the bottom of this file
-# 4. Use Gamma prime to do the forward and backward passes in this file
-# 5. Then the pcn kernel generator should be analagous to the rw_csmc kernel generators from gradient-csmc repository, except with the Gamma functions
-#     identical to the ones used by the csmc kernel generator from this repository
 """
 from typing import Callable, Union, Any
 
@@ -74,19 +66,6 @@ def kernel(
     Gamma_0, Gamma__0_params = Gamma_0 if isinstance(Gamma_0, tuple) else (Gamma_0, None)
     Gamma_t, Gamma_params = Gamma_t if isinstance(Gamma_t, tuple) else (Gamma_t, None)
 
-    ###########################################
-    #       Modified weight functions         #
-    ###########################################
-    def Gamma_t_tilde(x_t_m_1, x_t, params):
-        u_star_t, aux_u_t, original_params_t = params
-        dt = original_params_t[-1]
-        u_t, _ = x_t
-
-        val = Gamma_t(x_t_m_1, x_t, original_params_t)
-        val += pcn.logpdf(u_star_t, aux_u_t, rho, dt)
-        val += pcn.logpdf(aux_u_t, u_t, rho, dt)
-        return val
-    
     ########################################
     #         Auxiliary proposals          #
     ########################################
@@ -103,7 +82,7 @@ def kernel(
 
     vmapped_pcn_propose = jax.vmap(pcn.propose, in_axes=(0, 0, None, 0, None))
     aux_us = vmapped_pcn_propose(keys_aux_u, u_star, rho, dts, 1)                       # aux_u_t = rho*u_t + sqrt(1 - rho^2) * W_t()
-    us = vmapped_pcn_propose(keys_proposals_u, aux_us, rho, dts, N + 1)                  # u_t = rho*aux_u_t + sqrt(1 - rho^2) * W_t()
+    us = vmapped_pcn_propose(keys_proposals_u, aux_us, rho, dts, N + 1)                 # u_t = rho*aux_u_t + sqrt(1 - rho^2) * W_t()
 
     # print("aux_us shape: ", aux_us.shape)
     # print("u_star shape: ", u_star.shape)
@@ -132,13 +111,13 @@ def kernel(
     #################################
     def body(carry, inp):
         w_t_m_1, x_t_m_1 = carry
-        Gamma_tilde_params_t, x_t, b_star_t_m_1, b_star_t, key_t = inp
+        Gamma_params_t, x_t, b_star_t_m_1, b_star_t, key_t = inp
 
         # Conditional resampling
         A_t = resampling_func(key_t, w_t_m_1, b_star_t_m_1, b_star_t)
         x_t_m_1 = tree_map(lambda x: jnp.take(x, A_t, axis=0), x_t_m_1)
 
-        log_w_t = Gamma_t_tilde(x_t_m_1, x_t, Gamma_tilde_params_t)
+        log_w_t = Gamma_t(x_t_m_1, x_t, Gamma_params_t)
         log_w_t = normalize(log_w_t, log_space=True)
         w_t = jnp.exp(log_w_t)
 
@@ -149,8 +128,7 @@ def kernel(
         return next_carry, save
 
     # Run forward cSMC
-    Gamma_tilde_params = u_star[1:], aux_us[1:], Gamma_params
-    inputs = (Gamma_tilde_params, tree_map(lambda x: x[1:], xs), b_star[:-1], b_star[1:], keys_resampling,)
+    inputs = (Gamma_params, tree_map(lambda x: x[1:], xs), b_star[:-1], b_star[1:], keys_resampling,)
     _, (log_ws, As) = jax.lax.scan(body,
                                   (w0, x0),
                                   inputs,
