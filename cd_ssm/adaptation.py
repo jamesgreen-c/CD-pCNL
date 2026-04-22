@@ -21,6 +21,8 @@ def delta_rho_adaptation_routine(
         min_rate=1e-2,
         window_size=100,
         rate=0.1,
+        shared_delta: bool = False, 
+        shared_rho: bool = False,
         **_kwargs
 ):
     """
@@ -72,23 +74,26 @@ def delta_rho_adaptation_routine(
     fin_deltas:     Array, shape (T,). Final adapted delta values.
     fin_rhos:       Array, shape (T,). Final adapted rho values.
     """
-
-    init_us, init_es = init_xs
-    T = init_us.shape[0]
-
     if verbose:
         decorator = progress_bar_scan(n_steps, show=-1)
     else:
         decorator = lambda x: x
+    
+    init_us, init_es = init_xs
+    T = init_us.shape[0]
+
+    T_delta = 1 if shared_delta else T
+    T_rho   = 1 if shared_rho   else T
 
     adapt_delta = lambda _i, _deltas, _bs, _next_bs, _acc_hist: adapt(
         _i, _deltas, _bs, _next_bs, _acc_hist,
-        min_delta, max_delta, window_size, target_acceptance, min_rate, rate
+        min_delta, max_delta, window_size, target_acceptance, min_rate, rate,
+        shared=shared_delta
     )
-
     adapt_rho = lambda _i, _rhos, _bs, _next_bs, _acc_hist: adapt(
         _i, _rhos, _bs, _next_bs, _acc_hist,
-        min_rho, max_rho, window_size, target_acceptance, min_rate, rate
+        min_rho, max_rho, window_size, target_acceptance, min_rate, rate,
+        shared=shared_rho
     )
 
     @decorator
@@ -98,14 +103,14 @@ def delta_rho_adaptation_routine(
         i, key_d_i, key_r_i = inp
 
         # --- adapt delta ---
-        next_xs, next_bs, *_ = kernel(key_d_i, state, deltas, rhos, deltas_acc_hist)
+        next_xs, next_bs, *_ = kernel(key_d_i, state, deltas, rhos)
         deltas, deltas_acc_hist, deltas_acc_rates = adapt_delta(
             i, deltas, bs, next_bs, deltas_acc_hist
         )
 
         # --- adapt rho ---
         xs, bs, state = next_xs, next_bs, (next_xs, next_bs)
-        next_xs, next_bs, *_ = kernel(key_r_i, state, deltas, rhos, rhos_acc_hist)
+        next_xs, next_bs, *_ = kernel(key_r_i, state, deltas, rhos)
         rhos, rhos_acc_hist, rhos_acc_rates = adapt_rho(
             i, rhos, bs, next_bs, rhos_acc_hist
         )
@@ -119,24 +124,29 @@ def delta_rho_adaptation_routine(
             deltas_acc_hist, rhos_acc_hist,
             deltas_ar, rhos_ar
         )
-        return carry_out, None
+        return carry_out, (deltas, rhos, deltas_ar, rhos_ar)
 
     # initial carry
-    initial_deltas = initial_deltas * jnp.ones(T)
-    initial_rhos = initial_rhos * jnp.ones(T)
-    initial_acc_hist = jnp.zeros((T, window_size)) * jnp.nan
+    initial_deltas = initial_deltas * jnp.ones(T_delta)
+    initial_rhos = initial_rhos * jnp.ones(T_rho)
+
+    print(initial_deltas.shape)
+    print(initial_rhos.shape)
+    initial_acc_hist_delta = jnp.zeros((T_delta, window_size)) * jnp.nan
+    initial_acc_hist_rho = jnp.zeros((T_rho, window_size)) * jnp.nan
+
     init = (
         (init_xs, init_bs),
         initial_deltas, initial_rhos,
-        initial_acc_hist, initial_acc_hist,
-        jnp.mean(initial_acc_hist), jnp.mean(initial_acc_hist)
+        initial_acc_hist_delta, initial_acc_hist_rho,
+        jnp.mean(initial_acc_hist_delta), jnp.mean(initial_acc_hist_rho)
     )
 
     # --- adaptation ---
     key_d, key_r = jax.random.split(key)
     inps = jnp.arange(n_steps), jax.random.split(key_d, n_steps), jax.random.split(key_r, n_steps)
-    (fin_state, fin_deltas, fin_rhos, *_), _ = jax.lax.scan(body, init, inps)
-    return fin_state, fin_deltas, fin_rhos
+    (fin_state, fin_deltas, fin_rhos, *_), hist = jax.lax.scan(body, init, inps)
+    return fin_state, fin_deltas, fin_rhos, hist
 
 
 def adapt(
@@ -151,6 +161,7 @@ def adapt(
         target_acceptance,
         min_rate,
         rate,
+        shared: bool = False,
 ):
     """
     Performs one step of Robbins-Monro stochastic approximation to adapt a
@@ -186,6 +197,7 @@ def adapt(
     target_acceptance:  Desired acceptance rate (e.g. 0.234 for high-dimensional, 0.44 for 1D).
     min_rate:           Floor on the diminishing step size to prevent it collapsing too early.
     rate:               Initial step size scale factor, decayed as rate / sqrt(i+1).
+    mean_axis:          The axes to mean the acceptance rate over
 
     Returns
     -------
@@ -196,6 +208,10 @@ def adapt(
                             current window, one per time step.
     """
     accepted = next_bs != bs
+
+    # if scalar tuning parameter: pool all particles into a single acceptance signal
+    if shared:
+        accepted = jnp.mean(accepted)[None]
 
     # augment rolling window
     accepted_history = accepted_history.at[:, 1:].set(accepted_history[:, :-1])
@@ -218,3 +234,14 @@ def adapt(
     tuner = jnp.clip(tuner, min_tuner, max_tuner)
 
     return tuner, accepted_history, acceptance_rates
+
+
+    # initial_deltas = initial_deltas * jnp.ones(T)
+    # initial_rhos = initial_rhos * jnp.ones(T)
+    # initial_acc_hist = jnp.zeros((T, window_size)) * jnp.nan
+    # init = (
+    #     (init_xs, init_bs),
+    #     initial_deltas, initial_rhos,
+    #     initial_acc_hist, initial_acc_hist,
+    #     jnp.mean(initial_acc_hist), jnp.mean(initial_acc_hist)
+    # )

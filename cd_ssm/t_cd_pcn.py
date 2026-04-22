@@ -80,9 +80,10 @@ def kernel(
     dt_0, dts = Gamma__0_params[-1], Gamma_params[-1]
     dts = jnp.insert(dts, 0, dt_0, axis=0)
 
-    vmapped_pcn_propose = jax.vmap(pcn.propose, in_axes=(0, 0, None, 0, None))
-    aux_us = vmapped_pcn_propose(keys_aux_u, u_star, rho, dts, 1)                       # aux_u_t = rho*u_t + sqrt(1 - rho^2) * W_t()
-    us = vmapped_pcn_propose(keys_proposals_u, aux_us, rho, dts, N + 1)                 # u_t = rho*aux_u_t + sqrt(1 - rho^2) * W_t()
+    rhos = jnp.broadcast_to(jnp.atleast_1d(rho), (T,))
+    vmapped_pcn_propose = jax.vmap(pcn.propose, in_axes=(0, 0, 0, 0, None))
+    aux_us = vmapped_pcn_propose(keys_aux_u, u_star, rhos, dts, 1)                       # aux_u_t = rho*u_t + sqrt(1 - rho^2) * W_t()
+    us = vmapped_pcn_propose(keys_proposals_u, aux_us, rhos, dts, N + 1)                 # u_t = rho*aux_u_t + sqrt(1 - rho^2) * W_t()
 
     # print("aux_us shape: ", aux_us.shape)
     # print("u_star shape: ", u_star.shape)
