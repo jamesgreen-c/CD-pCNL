@@ -127,7 +127,7 @@ def one_experiment(key):
 
     true_xs, ys, *_ = get_data(data_key, PHI, SIGMA, args.D, DTs, args.mesh_num)
 
-    csmc_kernel, csmc_init, _ = get_csmc_kernel(
+    csmc_kernel, csmc_init, *_ = get_csmc_kernel(
         ys, DRIFT, DIFFUSION, SIGMA, N=args.N,
         num=args.mesh_num, dts=DTs,
         resampling_func=resampling_fn,
@@ -139,7 +139,7 @@ def one_experiment(key):
 
     init_xs, *_ = csmc_kernel(init_key, csmc_init(true_xs), None)
 
-    kernel_, init, _ = kernel_type.kernel_maker(
+    kernel_, init, *_ = kernel_type.kernel_maker(
         ys, DRIFT, DIFFUSION, SIGMA, N=args.N,
         num=args.mesh_num, dts=DTs,
         resampling_func=resampling_fn,
@@ -199,7 +199,7 @@ for k, key_k in enumerate(tqdm.tqdm(EXPERIMENT_KEYS, desc="Experiment: ")):
 if not os.path.exists("results"):
     os.mkdir("results")
 
-experiment_name = "kernel={},style={},rho={},D={},N={},mesh-num={},steps={},seed={}"
+experiment_name = "kernel={},style={},rho={},D={},N={},mesh-num={},steps={},M={},seed={}"
 experiment_name = experiment_name.format(
     kernel_type.name,
     args.style,
@@ -208,6 +208,7 @@ experiment_name = experiment_name.format(
     args.N,
     args.mesh_num,
     args.steps,
+    args.M,
     args.seed
 )
 

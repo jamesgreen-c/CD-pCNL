@@ -23,6 +23,7 @@ parser = argparse.ArgumentParser()
 
 parser.add_argument("--T", dest="T", type=int, default=10)
 parser.add_argument("--D", dest="D", type=int, default=1)
+parser.add_argument("--M", dest="M", type=int, default=5)
 parser.add_argument("--N", dest="N", type=int, default=31)  # total number of particles is N + 1
 parser.add_argument("--mesh-num", type=int, dest="mesh_num", default=100)
 parser.add_argument("--steps", type=int, default=100)
@@ -202,7 +203,7 @@ def plot_esjd(data, dirpath):
 
 def load_data():
     """ Load data for a given number of particles N"""
-    experiment_name = "kernel={},style={},rho={},D={},N={},mesh-num={},steps={},seed={}"
+    experiment_name = "kernel={},style={},rho={},D={},N={},mesh-num={},steps={},M={},seed={}"
     experiment_name = experiment_name.format(
         kernel_type.name,
         args.style,
@@ -211,6 +212,7 @@ def load_data():
         args.N,
         args.mesh_num,
         args.steps,
+        args.M,
         args.seed
     )
 
