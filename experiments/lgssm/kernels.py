@@ -18,6 +18,7 @@ from cd_ssm import brownian as br
 from cd_ssm import t_csmc
 from cd_ssm import t_cd_pcn
 from cd_ssm import bridge
+from cd_ssm import adaptation as adpt
 
 
 class KernelType(Enum):
@@ -264,5 +265,14 @@ def get_pcn_csmc_kernel(ys, drift: Callable, diffusion: Callable, sigma, N, num,
     def sampling_routine_fn(key, state, kernel_, n_steps, verbose, get_samples):
         return aux_sampling_routine(key, state[0], state[1], kernel_, n_steps, verbose, get_samples)
 
-    return kernel, init, sampling_routine_fn
+    def adaptation_routine(key, state, kernel_, target_acceptance, initial_delta, initial_rho,
+                         n_steps, verbose, **kwargs):
+        return adpt.delta_rho_adapation_routine(key, state[0], state[1], 
+                                                kernel_, 
+                                                target_acceptance,
+                                                initial_delta, initial_rho,
+                                                n_steps, verbose=verbose,
+                                                **kwargs)
+
+    return kernel, init, adaptation_routine,  sampling_routine_fn
 
