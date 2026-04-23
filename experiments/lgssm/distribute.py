@@ -12,15 +12,15 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--i", dest="i", type=int, default=-1)
 parser.add_argument("--seed", dest="seed", type=int, default=1234)
 parser.add_argument("--N", dest="N", type=int, default=31)  # total number of particles is N + 1
+parser.add_argument("--M", dest="M", type=int, default=100)
 args = parser.parse_args()
 
 
 def results_exist(*, kernel, style, rho, D, steps, mesh_num, args) -> bool:
     """ Mirror experiment.py's experiment_name + datapath convention and check if results already exist."""
 
-    experiment_name = (
-        "kernel={},style={},rho={},D={},N={},mesh-num={},steps={},seed={}"
-    ).format(
+    experiment_name = "kernel={},style={},rho={},D={},N={},mesh-num={},steps={},M={},seed={}"
+    experiment_name = experiment_name.format(
         kernel.name,
         style,
         rho,
@@ -28,7 +28,8 @@ def results_exist(*, kernel, style, rho, D, steps, mesh_num, args) -> bool:
         args.N,
         mesh_num,
         steps,
-        args.seed,
+        args.M,
+        args.seed
     )
 
     datapath = os.path.join("results", experiment_name, "data.npz")
@@ -64,10 +65,10 @@ for j in indices:
     D, T, steps, mesh, rho, (kernel, style, *_) = combination[j]
 
     if results_exist(kernel=kernel, style=style, rho=rho, D=D, steps=steps, mesh_num=mesh, args=args):
-        print(ctext(f"Skipping (already run): kernel={kernel.name}, style={style}, rho={rho}, T={T}, D={D}, steps={steps}, mesh-num={mesh}, N={args.N}", "yellow"))
+        print(ctext(f"Skipping (already run): kernel={kernel.name}, style={style}, rho={rho}, T={T}, D={D}, steps={steps}, mesh-num={mesh}, N={args.N}, M={args.M}", "yellow"))
         continue
 
-    exec_str = "python3 experiment.py --kernel {} --style {} --D {} --T {} --steps {} --mesh-num {} --rho {} --N {}"
-    exec_str = exec_str.format(kernel.value, style, D, T, steps, mesh, rho, args.N)
+    exec_str = "python3 experiment.py --kernel {} --style {} --D {} --T {} --steps {} --mesh-num {} --rho {} --N {} --M {}"
+    exec_str = exec_str.format(kernel.value, style, D, T, steps, mesh, rho, args.N, args.M)
     print("\nExecuting:", ctext(exec_str, "green"))
-    os.system(exec_str)
+    # os.system(exec_str)
