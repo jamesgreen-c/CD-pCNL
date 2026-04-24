@@ -34,8 +34,7 @@ parser.add_argument("--rho", dest="rho", type=float, default=0.5)
 parser.add_argument("--steps", type=int, default=100)
 parser.add_argument("--mesh-num", dest="mesh_num", type=int, default=100)
 
-parser.add_argument("--delta", dest="delta", type=float,
-                    default=1.)
+parser.add_argument("--delta", dest="delta", type=float, default=1.)
 parser.add_argument("--delta-scale", dest="delta_scale", type=float, default=1 / 3)
 parser.add_argument("--delta-arg", dest="delta_arg", type=str, default="na")
 parser.add_argument("--seed", dest="seed", type=int, default=1234)

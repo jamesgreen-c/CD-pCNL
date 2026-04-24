@@ -37,8 +37,17 @@ parser.add_argument("--style", dest="style", type=str, default="guided")
 
 parser.add_argument("--i", type=int, default=0)
 
+parser.add_argument("--grouped", des="grouped", action="store_true")
+parser.set_defaults(grouped=False)
+
 args = parser.parse_args()
 
+
+###############################
+#  SINGLE ANALYSIS FUNCTIONS  #
+###############################
+
+# --- args ---
 RHO = 0.5
 kernel_type = KernelType(args.kernel)
 
@@ -48,7 +57,7 @@ DRIFT, DIFFUSION = get_dynamics(PHI, SIGMA)
 DT = args.T / args.steps
 Ts = np.arange(args.steps) * DT
 
-
+# --- functions ---
 def plot_particles(data, dirpath, dim=0):
     """
     Plot one panel per MCMC chain showing:
@@ -201,21 +210,174 @@ def plot_esjd(data, dirpath):
     plt.close(fig)
 
 
-def load_data():
-    """ Load data for a given number of particles N"""
+
+##############################
+#  GROUP ANALYSIS FUNCTIONS  #
+##############################
+
+# --- arguments ---
+DS = (1, 5, 10, 50, 100, )
+TS = (10,)
+STEPS = (10, 50, 100, 150, 200,)
+MESH_NUMS = (5, 10, 25, 50, 75, 100,)
+RHOS = (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0,)
+
+KERNELS = (
+    KernelType.CSMC,
+    KernelType.PCN
+)
+
+STYLES = (
+    'guided',
+    'na',
+)
+
+# --- functions ---
+def _mean_esjd(data):
+    """
+    Returns mean ESJD for u and e.
+
+    Notes
+    -----
+    esjd_us has shape (K, steps). The zeroth u index is ignored.
+    esjd_es has shape (K, steps).
+    """
+    esjd_us = data["esjd_us"]  # (K, steps)
+    esjd_es = data["esjd_es"]  # (K, steps)
+
+    esjd_u = esjd_us[:, 1:].sum(axis=1).mean()
+    esjd_e = esjd_es.sum(axis=1).mean()
+
+    return esjd_u, esjd_e
+
+
+def _plot_esjd_against(
+        dirpath,
+        values,
+        xlabel: str,
+        filename: str,
+        *,
+        D: int = 10,
+        T: int = 10,
+        steps: int = 100,
+        mesh_num: int = 50,
+        rho: float = 0.5,
+    ):
+    fig, ax = plt.subplots(2, 1, figsize=(15, 10), sharex=True)
+
+    for kern in KERNELS:
+        for style in STYLES:
+
+            esjd_u_arr = np.empty(len(values))
+            esjd_e_arr = np.empty(len(values))
+
+            for j, value in enumerate(values):
+
+                D_j = D
+                T_j = T
+                steps_j = steps
+                mesh_num_j = mesh_num
+                rho_j = rho
+
+                if xlabel == "D":
+                    D_j = value
+                elif xlabel == "T":
+                    T_j = value
+                elif xlabel == "Steps":
+                    steps_j = value
+                elif xlabel == "Mesh number":
+                    mesh_num_j = value
+                elif xlabel == "Rho":
+                    rho_j = value
+                else:
+                    raise ValueError(f"Unknown x-axis variable: {xlabel}")
+
+                data = load_data(
+                    kern,
+                    style,
+                    rho_j,
+                    D_j,
+                    T_j,
+                    steps_j,
+                    mesh_num_j,
+                )
+
+                esjd_u_arr[j], esjd_e_arr[j] = _mean_esjd(data)
+
+            label = f"Kernel: {kern.name}, style={style}"
+            ax[0].plot(values, esjd_u_arr, marker="o", label=label)
+            ax[1].plot(values, esjd_e_arr, marker="o", label=label)
+
+    ax[0].set_ylabel("Mean ESJD: $u$")
+    ax[1].set_ylabel("Mean ESJD: $e$")
+    ax[1].set_xlabel(xlabel)
+
+    ax[0].legend()
+    ax[1].legend()
+
+    plt.tight_layout()
+    fig.savefig(f"{dirpath}/{filename}", dpi=200, bbox_inches="tight")
+    plt.close(fig)
+
+
+def plot_esjd_against_d(
+        dirpath,
+        T: int = 10,
+        steps: int = 100,
+        mesh_num: int = 50,
+        rho: float = 0.5,
+    ):
+    _plot_esjd_against(dirpath, DS, "D", "esjd_vs_d.png", T=T, steps=steps, mesh_num=mesh_num, rho=rho,)
+
+
+def plot_esjd_against_steps(
+        dirpath,
+        D: int = 10,
+        T: int = 10,
+        mesh_num: int = 50,
+        rho: float = 0.5,
+    ):
+    _plot_esjd_against(dirpath, STEPS, "Steps", "esjd_vs_steps.png", D=D, T=T, mesh_num=mesh_num, rho=rho,)
+
+
+def plot_esjd_against_rho(
+        dirpath,
+        D: int = 10,
+        T: int = 10,
+        steps: int = 100,
+        mesh_num: int = 50,
+    ):
+    _plot_esjd_against(dirpath, RHOS, "Rho", "esjd_vs_rho.png", D=D, T=T, steps=steps, mesh_num=mesh_num,)
+
+
+def plot_esjd_against_mesh_num(
+        dirpath,
+        D: int = 10,
+        T: int = 10,
+        steps: int = 100,
+        rho: float = 0.5,
+    ):
+    _plot_esjd_against(dirpath, MESH_NUMS, "Mesh number", "esjd_vs_mesh_num.png", D=D, T=T, steps=steps, rho=rho,)
+
+
+
+########################
+#  load data function  #
+########################
+
+def load_data(kernel, style, rho, D, mesh_num, steps):
     experiment_name = "kernel={},style={},rho={},D={},N={},mesh-num={},steps={},M={},seed={}"
     experiment_name = experiment_name.format(
-        kernel_type.name,
-        args.style,
-        RHO,
-        args.D,
+        kernel.name,
+        style,
+        rho,
+        D,
         args.N,
-        args.mesh_num,
-        args.steps,
+        mesh_num,
+        steps,
         args.M,
         args.seed
     )
-
     dirpath = f"results/{experiment_name}"
     if not os.path.exists(dirpath):
         print(ctext("No such experiment exists", "yellow"))
@@ -224,8 +386,53 @@ def load_data():
 
     data = np.load(f"{dirpath}/data.npz")
     return data, dirpath
+    
 
-data, dirpath = load_data()
-plot_particles(data, dirpath)
-plot_paths(data, dirpath)
-plot_esjd(data, dirpath)
+
+if not args.grouped:
+    data, dirpath = load_data(
+        kernel_type,
+        args.style,
+        RHO,
+        args.D,
+        args.mesh_num.
+        args.steps
+    )
+    data, dirpath = load_data()
+    plot_particles(data, dirpath)
+    plot_paths(data, dirpath)
+    plot_esjd(data, dirpath)
+
+else: 
+
+    dirpath="results"
+    plot_esjd_against_d()
+    plot_esjd_against_steps()
+    plot_esjd_against_mesh_num()
+    plot_esjd_against_rho()
+
+
+
+# def load_data():
+#         """ Load data for a given number of particles N"""
+#         experiment_name = "kernel={},style={},rho={},D={},N={},mesh-num={},steps={},M={},seed={}"
+#         experiment_name = experiment_name.format(
+#             kernel_type.name,
+#             args.style,
+#             RHO,
+#             args.D,
+#             args.N,
+#             args.mesh_num,
+#             args.steps,
+#             args.M,
+#             args.seed
+#         )
+
+#         dirpath = f"results/{experiment_name}"
+#         if not os.path.exists(dirpath):
+#             print(ctext("No such experiment exists", "yellow"))
+#             print(experiment_name)
+#             exit()
+
+#         data = np.load(f"{dirpath}/data.npz")
+#         return data, dirpath
