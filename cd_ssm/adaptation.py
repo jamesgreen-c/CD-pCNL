@@ -17,10 +17,12 @@ def delta_rho_adaptation_routine(
         min_delta=1e-12,
         max_delta=1e2,
         min_rho=1e-12,
-        max_rho=1.,
-        min_rate=1e-2,
+        max_rho=.99999,
+        delta_min_rate=1e-2,
+        rho_min_rate=1e-5,
         window_size=100,
-        rate=0.1,
+        delta_rate=0.1,
+        rho_rate=0.01,
         shared_delta: bool = False, 
         shared_rho: bool = False,
         **_kwargs
@@ -87,12 +89,12 @@ def delta_rho_adaptation_routine(
 
     adapt_delta = lambda _i, _deltas, _bs, _next_bs, _acc_hist: adapt(
         _i, _deltas, _bs, _next_bs, _acc_hist,
-        min_delta, max_delta, window_size, target_acceptance, min_rate, rate,
+        min_delta, max_delta, window_size, target_acceptance, delta_min_rate, delta_rate,
         shared=shared_delta
     )
     adapt_rho = lambda _i, _rhos, _bs, _next_bs, _acc_hist: adapt(
         _i, _rhos, _bs, _next_bs, _acc_hist,
-        min_rho, max_rho, window_size, target_acceptance, min_rate, rate,
+        min_rho, max_rho, window_size, target_acceptance, rho_min_rate, rho_rate,
         shared=shared_rho
     )
 
@@ -130,8 +132,6 @@ def delta_rho_adaptation_routine(
     initial_deltas = initial_deltas * jnp.ones(T_delta)
     initial_rhos = initial_rhos * jnp.ones(T_rho)
 
-    print(initial_deltas.shape)
-    print(initial_rhos.shape)
     initial_acc_hist_delta = jnp.zeros((T_delta, window_size)) * jnp.nan
     initial_acc_hist_rho = jnp.zeros((T_rho, window_size)) * jnp.nan
 
