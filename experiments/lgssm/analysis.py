@@ -296,8 +296,8 @@ def _plot_esjd_against(
                 style,
                 rho_j,
                 D_j,
-                steps_j,
                 mesh_num_j,
+                steps_j,
             )
             if data is None:
                 continue
