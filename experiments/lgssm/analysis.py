@@ -191,9 +191,17 @@ def plot_esjd(data, dirpath):
     """
     
     """
-    esjd_us = data["esjd_us"][args.i]   # (T, )  
-    esjd_es = data["esjd_es"][args.i]   # (T, )
-    
+    esjd_us = data["esjd_us"]  # (K, steps)
+    esjd_es = data["esjd_es"]  # (K, steps)
+
+    mean_esjd_u = esjd_us[:, 1:].sum(axis=1).mean()
+    mean_esjd_e = esjd_es.sum(axis=1).mean()
+    print("Mean ESJD us: ", mean_esjd_u)
+    print("Mean ESJD es: ", mean_esjd_e)
+
+    esjd_us = esjd_us[args.i]  # (steps, )
+    esjd_es = esjd_es[args.i]  # (steps, )
+
     fig, ax = plt.subplots(2, 1, figsize=(15, 10))
     ax[0].plot(Ts, esjd_us)
     ax[0].set_xlabel("t")
@@ -267,8 +275,9 @@ def _plot_esjd_against(
 
     for kern, style in zip(KERNELS, STYLES):
 
-        esjd_u_arr = np.empty(len(values))
-        esjd_e_arr = np.empty(len(values))
+        xs = []
+        esjd_u_vals = []
+        esjd_e_vals = []
 
         for j, value in enumerate(values):
 
@@ -291,7 +300,7 @@ def _plot_esjd_against(
             else:
                 raise ValueError(f"Unknown x-axis variable: {xlabel}")
 
-            data = load_data(
+            data, _ = load_data(
                 kern,
                 style,
                 rho_j,
@@ -299,17 +308,26 @@ def _plot_esjd_against(
                 mesh_num_j,
                 steps_j,
             )
-            if data is None:
-                continue
 
-            esjd_u_arr[j], esjd_e_arr[j] = _mean_esjd(data)
+            xs.append(value)
+            if data is None:
+                esjd_u_vals.append(np.nan)
+                esjd_e_vals.append(np.nan)
+            else:
+                esjd_u, esjd_e = _mean_esjd(data)
+                esjd_u_vals.append(esjd_u)
+                esjd_e_vals.append(esjd_e)
+
+        # skip this kernel/style if no data was loaded
+        if len(xs) == 0:
+            continue
 
         label = f"Kernel: {kern.name}, style={style}"
-        ax[0].plot(values, esjd_u_arr, marker="o", label=label)
-        ax[1].plot(values, esjd_e_arr, marker="o", label=label)
+        ax[0].plot(values, esjd_u_vals, marker="o", label=label)
+        ax[1].plot(values, esjd_e_vals, marker="o", label=label)
 
-    ax[0].set_ylabel("Log Mean ESJD: $u$")
-    ax[1].set_ylabel("Log Mean ESJD: $e$")
+    ax[0].set_ylabel("Mean ESJD: $u$")
+    ax[1].set_ylabel("Mean ESJD: $e$")
     ax[1].set_xlabel(xlabel)
 
     ax[0].legend()
@@ -382,7 +400,7 @@ def load_data(kernel, style, rho, D, mesh_num, steps):
     if not os.path.exists(dirpath):
         print(ctext("No such experiment exists", "yellow"))
         print(experiment_name)
-        return None
+        return None, None 
         # exit(
 
     data = np.load(f"{dirpath}/data.npz")
@@ -399,9 +417,8 @@ if not args.grouped:
         args.mesh_num,
         args.steps
     )
-    data, dirpath = load_data()
-    plot_particles(data, dirpath)
-    plot_paths(data, dirpath)
+    # plot_particles(data, dirpath)
+    # plot_paths(data, dirpath)
     plot_esjd(data, dirpath)
 
 else: 
