@@ -20,12 +20,15 @@ from cd_ssm.utils.resamplings import killing, multinomial
 # jax.config.update("jax_platform_name", "cpu")
 
 # --- general config ---
-MIN_DELTA = MIN_RHO = 1e-5
-MAX_DELTA = MAX_RHO = 1e1
-MIN_RATE = 1e-3
+MIN_DELTA = 1e-5
+MAX_DELTA = 1e1
+MIN_RHO = 1e-2
+MAX_RHO = 1 - 1e-5
+DELTA_MIN_RATE = 1e-3
+RHO_MIN_RATE = 1e-6
 ADAPTATION_WINDOW = 100
-ADAPTATION_RATE = 0.5
-N_LAGS = 1_000
+DELTA_ADAPTATION_RATE = 0.5
+RHO_ADAPTATION_RATE = 0.025
 
 # ARGS PARSING
 parser = argparse.ArgumentParser()
@@ -41,7 +44,7 @@ parser.add_argument("--phi", dest="phi", type=float, default=0.8)
 parser.add_argument("--steps", type=int, default=100)
 parser.add_argument("--mesh-num", dest="mesh_num", type=int, default=50)
 
-parser.add_argument("--adaptation", dest="adaptation", type=int, default=17)
+parser.add_argument("--adaptation", dest="adaptation", type=int, default=1000)
 parser.add_argument("--rho-init", dest="rho_init", type=float, default=0.5)
 parser.add_argument("--delta-init", dest="delta_init", type=float,
                     default=10 ** (0.5 * (np.log10(MIN_DELTA) + np.log10(MAX_DELTA))))
@@ -150,7 +153,7 @@ def one_experiment(key):
         style=args.style, 
         conditional=True
     )
-    adaptation_kernel = kernel
+    adaptation_kernel = jax.jit(kernel)
     init_state = init(init_xs)
     
     # --- adapt delta and rho
@@ -163,70 +166,63 @@ def one_experiment(key):
         min_delta=MIN_DELTA, max_delta=MAX_DELTA,
         min_rho=MIN_RHO, max_rho=MAX_RHO,
         window_size=ADAPTATION_WINDOW,
-        rate=ADAPTATION_RATE, min_rate=MIN_RATE,
+        delta_rate=DELTA_ADAPTATION_RATE, delta_min_rate=DELTA_MIN_RATE,
+        rho_rate=RHO_ADAPTATION_RATE, rho_min_rate=RHO_MIN_RATE,
         target_stat=TARGET_STAT,
         shared_delta=SHARED_DELTA, shared_rho=SHARED_RHO
     )
 
     deltas_hist, rhos_hist, deltas_ar_hist, rhos_ar_hist = adaptation_hist
     return deltas_hist, rhos_hist, deltas_ar_hist, rhos_ar_hist
-    
-    # # --- fix adaptation values ---
-    # kernel_ = jax.jit(kernel)
-    # kernel_ = lambda k_, s: kernel_(k_, s, adapted_delta, adapted_rho)
 
-    # # --- experiment ---
-    # def esjd(k_):
-    #     xs, *_ = init_state
-    #     next_xs, *_ = kernel_(k_, init_state)
-    #     _esjds = tree_map(lambda _xp, _x: jnp.sum((_xp - _x) ** 2, axis=jnp.arange(1, _xp.ndim)), xs, next_xs)
-    #     return _esjds, next_xs
 
-    # sample_keys = jax.random.split(sample_key, args.M)
+T_delta = 1 if SHARED_DELTA else args.steps
+T_rho = 1 if SHARED_RHO else args.steps
 
-    # (esjd_vals, samples) = jax.vmap(esjd)(sample_keys)
-    # esjd_means = tree_map(lambda _sjd: _sjd.mean(0), esjd_vals)
-    # return esjd_means, samples, true_xs, ys, init_xs
-
+delta_hist_all = np.empty((args.K, args.adaptation, T_delta))
+rho_hist_all = np.empty((args.K, args.adaptation, T_rho))
+delta_acc_rates_hist_all = np.empty((args.K, args.adaptation,))
+rho_acc_rates_hist_all = np.empty((args.K, args.adaptation,))
 
 for k, key_k in enumerate(tqdm.tqdm(EXPERIMENT_KEYS, desc="Experiment: ")):
     deltas_hist_k, rhos_hist_k, deltas_ar_hist_k, rhos_ar_hist_k = one_experiment(key_k)
     
-    print(f"deltas hist shape: {deltas_hist_k.shape}")
-    print(f"rhos hist shape: {rhos_hist_k.shape}")
-    print(f"deltas acceptance rate hist shape: {deltas_ar_hist_k.shape   }")
-    print(f"rhos acceptance rate hist shape: {rhos_ar_hist_k.shape}")
+    # print(f"deltas hist shape: {deltas_hist_k.shape}")
+    # print(f"rhos hist shape: {rhos_hist_k.shape}")
+    # print(f"deltas acceptance rate hist shape: {deltas_ar_hist_k.shape   }")
+    # print(f"rhos acceptance rate hist shape: {rhos_ar_hist_k.shape}")
 
-# if not os.path.exists("results"):
-#     os.mkdir("results")
+    delta_hist_all[k] = deltas_hist_k
+    rho_hist_all[k] = rhos_hist_k
+    delta_acc_rates_hist_all[k] = deltas_ar_hist_k
+    rho_acc_rates_hist_all[k] = rhos_ar_hist_k
 
-# experiment_name = "kernel={},style={},D={},N={},mesh-num={},steps={},M={},seed={}"
-# experiment_name = experiment_name.format(
-#     kernel_type.name,
-#     args.style,
-#     args.D,
-#     args.N,
-#     args.mesh_num,
-#     args.steps,
-#     args.M,
-#     args.seed
-# )
+if not os.path.exists("results"):
+    os.mkdir("results")
 
-# dirpath = f"results/{experiment_name}"
-# if not os.path.exists(dirpath):
-#     os.mkdir(dirpath)
+experiment_name = "kernel={},style={},adaptation={},target={},D={},N={},mesh-num={},steps={},seed={}"
+experiment_name = experiment_name.format(
+    kernel_type.name,
+    args.style,
+    args.adaptation,
+    args.target,
+    args.D,
+    args.N,
+    args.mesh_num,
+    args.steps,
+    args.seed
+)
 
-# datapath = f"{dirpath}/data.npz"
-# np.savez_compressed(
-#     datapath, 
-#     esjd_us=esjd_us,
-#     esjd_es=esjd_es,
-#     us=us_all,
-#     es=es_all,
-#     true_us=true_us_all,
-#     true_es=true_es_all,
-#     ys=ys_all,
-#     init_us=init_us_all,
-#     init_es=init_es_all
-# )
+dirpath = f"results/{experiment_name}"
+if not os.path.exists(dirpath):
+    os.mkdir(dirpath)
+
+datapath = f"{dirpath}/data.npz"
+np.savez_compressed(
+    datapath, 
+    delta_hist=delta_hist_all,
+    rho_hist=rho_hist_all,
+    delta_acc_rates_hist=delta_acc_rates_hist_all,
+    rho_acc_rates_hist=rho_acc_rates_hist_all
+)
 

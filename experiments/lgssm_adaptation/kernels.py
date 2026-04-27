@@ -12,7 +12,7 @@ from jax.scipy.stats import norm
 from experiments.lgssm_adaptation.model import log_potential
 
 from cd_ssm.utils.math import mvn_logpdf
-from cd_ssm.utils.mcmc_utils import aux_sampling_routine
+from cd_ssm.utils.mcmc_utils import aux_sampling_routine, delta_adaptation_routine
 from cd_ssm import euler
 from cd_ssm import brownian as br
 from cd_ssm import t_csmc
@@ -131,7 +131,12 @@ def get_csmc_kernel(ys, drift: Callable, diffusion: Callable, sigma, N, num, dts
     def sampling_routine_fn(key, state, kernel_, n_steps, verbose, get_samples):
         return aux_sampling_routine(key, state[0], state[1], kernel_, n_steps, verbose, get_samples)
 
-    return kernel, init, sampling_routine_fn
+    def adaptation_routine(key, state, kernel_, target_acceptance, initial_delta,
+                           n_steps, verbose, **_kwargs):
+        return delta_adaptation_routine(key, state[0], state[1], kernel_, target_acceptance,
+                                        initial_delta, n_steps, verbose, **_kwargs)
+
+    return kernel, init, adaptation_routine, sampling_routine_fn
 
 
 def get_filter_csmc_kernel(ys, drift: Callable, diffusion: Callable, sigma, N, num, dts, style="guided", **kwargs):
@@ -210,7 +215,12 @@ def get_filter_csmc_kernel(ys, drift: Callable, diffusion: Callable, sigma, N, n
     def sampling_routine_fn(key, state, kernel_, n_steps, verbose, get_samples):
         return aux_sampling_routine(key, state[0], state[1], kernel_, n_steps, verbose, get_samples)
 
-    return kernel, init, sampling_routine_fn
+    def adaptation_routine(key, state, kernel_, target_acceptance, initial_delta,
+                           n_steps, verbose, **_kwargs):
+        return delta_adaptation_routine(key, state[0], state[1], kernel_, target_acceptance,
+                                        initial_delta, n_steps, verbose, **_kwargs)
+    
+    return kernel, init, adaptation_routine, sampling_routine_fn
 
 
 
