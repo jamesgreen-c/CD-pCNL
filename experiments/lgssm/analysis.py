@@ -37,7 +37,7 @@ parser.add_argument("--style", dest="style", type=str, default="guided")
 
 parser.add_argument("--i", type=int, default=0)
 
-parser.add_argument("--grouped", des="grouped", action="store_true")
+parser.add_argument("--grouped", dest="grouped", action="store_true")
 parser.set_defaults(grouped=False)
 
 args = parser.parse_args()
