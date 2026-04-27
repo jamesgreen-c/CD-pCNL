@@ -90,12 +90,14 @@ def delta_rho_adaptation_routine(
     adapt_delta = lambda _i, _deltas, _bs, _next_bs, _acc_hist: adapt(
         _i, _deltas, _bs, _next_bs, _acc_hist,
         min_delta, max_delta, window_size, target_acceptance, delta_min_rate, delta_rate,
-        shared=shared_delta
+        shared=shared_delta, 
+        direction=+1,
     )
     adapt_rho = lambda _i, _rhos, _bs, _next_bs, _acc_hist: adapt(
         _i, _rhos, _bs, _next_bs, _acc_hist,
         min_rho, max_rho, window_size, target_acceptance, rho_min_rate, rho_rate,
-        shared=shared_rho
+        shared=shared_rho,
+        direction=-1
     )
 
     @decorator
@@ -162,6 +164,7 @@ def adapt(
         min_rate,
         rate,
         shared: bool = False,
+        direction: int = 1
 ):
     """
     Performs one step of Robbins-Monro stochastic approximation to adapt a
@@ -226,7 +229,7 @@ def adapt(
     rate_i = jnp.maximum(min_rate, rate / (i + 1) ** 0.5)
 
     # --- adaptation update ---
-    tuner_updated = tuner + rate_i * tuner * (
+    tuner_updated = tuner + direction * rate_i * tuner * (
         acceptance_rates - target_acceptance
     ) / target_acceptance
 
