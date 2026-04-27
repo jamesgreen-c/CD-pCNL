@@ -1,11 +1,19 @@
 """
 Implements the CD-PCN kernel.
+
+
+HUGE BUG FIX REQUIRED: 
+1. G'_t = Q_t = M_tG_t = Gamma_t implemented in the kernels. This is used as the weights in the forward pass (correct)
+2. The backward pass needs Q'_t (current passing Gamma_t). Where Q'_t needs to be implemented as log G'_t + log M'_t 
+    = Gamma_t + log M'_t with log M'_t = pcn logpdf (u_t^i | phi_t^u) + norm logpdf (e_t^i | phi_t^e, ell_t / 2)
+ie just write a Gamma_tilde_t function and pass that to backward pass functions, and we're good. 
 """
 from typing import Callable, Union, Any
 
 import jax
 from chex import Array, PRNGKey
 from jax import numpy as jnp
+from jax.scipy.stats import norm
 from jax.tree_util import tree_map, tree_reduce
 
 from cd_ssm.t_csmc import backward_sampling_pass, backward_scanning_pass
@@ -65,6 +73,20 @@ def kernel(
     # Unpack Gamma function
     Gamma_0, Gamma__0_params = Gamma_0 if isinstance(Gamma_0, tuple) else (Gamma_0, None)
     Gamma_t, Gamma_params = Gamma_t if isinstance(Gamma_t, tuple) else (Gamma_t, None)
+
+    ########################################
+    #         Augmented potential          #
+    ########################################
+    vec_norm_logpdf = jnp.vectorize(norm.logpdf, signature="(d),(d)->()", excluded=(2,))
+    def Gamma_t_tilde(x_t_m_1, x_t, params):
+        ell_t, rho_t, aux_u_t, aux_e_t, orig_params = params
+        dt = orig_params[2]
+        u_t, e_t = x_t
+
+        val = Gamma_t(x_t_m_1, x_t, orig_params)
+        val += pcn.logpdf(u_t, aux_u_t, rho_t, dt)
+        val += -jnp.sum((e_t - aux_e_t) ** 2, axis=-1) / ell_t
+        return val
 
     ########################################
     #         Auxiliary proposals          #
@@ -141,8 +163,9 @@ def kernel(
     #################################
     #        Backward pass          #
     #################################
+    Gamma_tilde_params = ells[1:], rhos[1:], aux_us[1:], aux_es[1:], Gamma_params
     if backward:
-        xs, Bs = backward_sampling_pass(key_backward, Gamma_t, Gamma_params, b_star[-1], xs, log_ws,
+        xs, Bs = backward_sampling_pass(key_backward, Gamma_t_tilde, Gamma_tilde_params, b_star[-1], xs, log_ws,
                                         ancestor_move_func)
     else:
         xs, Bs = backward_scanning_pass(key_backward, As, b_star[-1], xs, log_ws[-1], ancestor_move_func)

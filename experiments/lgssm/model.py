@@ -78,7 +78,7 @@ def get_data(
     eps_es, eps_ys = jax.random.normal(sampling_key, (2, K, dim))
     def body(e_k, inps):
         eps_e, eps_y, At, Qt = inps
-        y_k = e_k + eps_y
+        y_k = e_k + 0.2 * eps_y
         e_kp1 = At * e_k + Qt * eps_e
         return e_kp1, (e_k, y_k)
     

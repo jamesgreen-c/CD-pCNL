@@ -249,7 +249,7 @@ def get_pcn_csmc_kernel(ys, drift: Callable, diffusion: Callable, sigma, N, num,
             _, e_t_m_1 = z_t_m_1
             u_t, e_t = z_t
             x_t = bridge.to_path(diffusion, u_t, e_t_m_1, e_t, t, dt)
-            return log_potential(x_t, e_t_m_1, y_t, drift, diffusion, t, dt) + Mt_logpdf(z_t_m_1, z_t, params)
+            return log_potential(x_t, e_t_m_1, y_t, drift, diffusion, t, dt) # bug (not needed): + Mt_logpdf(z_t_m_1, z_t, params)
         
     else:
         raise NotImplementedError(f"Unknown style: {style}, choose from: 'na', TODO - 'langevin")
