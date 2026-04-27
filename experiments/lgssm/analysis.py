@@ -265,52 +265,51 @@ def _plot_esjd_against(
     ):
     fig, ax = plt.subplots(2, 1, figsize=(15, 10), sharex=True)
 
-    for kern in KERNELS:
-        for style in STYLES:
+    for kern, style in zip(KERNELS, STYLES):
 
-            esjd_u_arr = np.empty(len(values))
-            esjd_e_arr = np.empty(len(values))
+        esjd_u_arr = np.empty(len(values))
+        esjd_e_arr = np.empty(len(values))
 
-            for j, value in enumerate(values):
+        for j, value in enumerate(values):
 
-                D_j = D
-                T_j = T
-                steps_j = steps
-                mesh_num_j = mesh_num
-                rho_j = rho
+            D_j = D
+            T_j = T
+            steps_j = steps
+            mesh_num_j = mesh_num
+            rho_j = rho
 
-                if xlabel == "D":
-                    D_j = value
-                elif xlabel == "T":
-                    T_j = value
-                elif xlabel == "Steps":
-                    steps_j = value
-                elif xlabel == "Mesh number":
-                    mesh_num_j = value
-                elif xlabel == "Rho":
-                    rho_j = value
-                else:
-                    raise ValueError(f"Unknown x-axis variable: {xlabel}")
+            if xlabel == "D":
+                D_j = value
+            elif xlabel == "T":
+                T_j = value
+            elif xlabel == "Steps":
+                steps_j = value
+            elif xlabel == "Mesh number":
+                mesh_num_j = value
+            elif xlabel == "Rho":
+                rho_j = value
+            else:
+                raise ValueError(f"Unknown x-axis variable: {xlabel}")
 
-                data = load_data(
-                    kern,
-                    style,
-                    rho_j,
-                    D_j,
-                    steps_j,
-                    mesh_num_j,
-                )
-                if data is None:
-                    continue
+            data = load_data(
+                kern,
+                style,
+                rho_j,
+                D_j,
+                steps_j,
+                mesh_num_j,
+            )
+            if data is None:
+                continue
 
-                esjd_u_arr[j], esjd_e_arr[j] = _mean_esjd(data)
+            esjd_u_arr[j], esjd_e_arr[j] = _mean_esjd(data)
 
-            label = f"Kernel: {kern.name}, style={style}"
-            ax[0].plot(values, esjd_u_arr, marker="o", label=label)
-            ax[1].plot(values, esjd_e_arr, marker="o", label=label)
+        label = f"Kernel: {kern.name}, style={style}"
+        ax[0].plot(values, esjd_u_arr, marker="o", label=label)
+        ax[1].plot(values, esjd_e_arr, marker="o", label=label)
 
-    ax[0].set_ylabel("Mean ESJD: $u$")
-    ax[1].set_ylabel("Mean ESJD: $e$")
+    ax[0].set_ylabel("Log Mean ESJD: $u$")
+    ax[1].set_ylabel("Log Mean ESJD: $e$")
     ax[1].set_xlabel(xlabel)
 
     ax[0].legend()
@@ -397,7 +396,7 @@ if not args.grouped:
         args.style,
         RHO,
         args.D,
-        args.mesh_num.
+        args.mesh_num,
         args.steps
     )
     data, dirpath = load_data()
