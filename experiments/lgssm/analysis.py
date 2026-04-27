@@ -406,10 +406,10 @@ if not args.grouped:
 else: 
 
     dirpath="results"
-    plot_esjd_against_d()
-    plot_esjd_against_steps()
-    plot_esjd_against_mesh_num()
-    plot_esjd_against_rho()
+    plot_esjd_against_d(dirpath)
+    plot_esjd_against_steps(dirpath)
+    plot_esjd_against_mesh_num(dirpath)
+    plot_esjd_against_rho(dirpath)
 
 
 
