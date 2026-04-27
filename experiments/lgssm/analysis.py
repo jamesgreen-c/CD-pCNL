@@ -300,6 +300,8 @@ def _plot_esjd_against(
                     steps_j,
                     mesh_num_j,
                 )
+                if data is None:
+                    continue
 
                 esjd_u_arr[j], esjd_e_arr[j] = _mean_esjd(data)
 
@@ -381,7 +383,8 @@ def load_data(kernel, style, rho, D, mesh_num, steps):
     if not os.path.exists(dirpath):
         print(ctext("No such experiment exists", "yellow"))
         print(experiment_name)
-        exit()
+        return None
+        # exit(
 
     data = np.load(f"{dirpath}/data.npz")
     return data, dirpath
