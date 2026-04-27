@@ -93,6 +93,7 @@ def kernel(
     ########################################
 
     # auxiliary endpoint proposals
+    ells = jnp.broadcast_to(jnp.atleast_1d(ells), (T,))
     aux_e_std_devs = jnp.sqrt(0.5 * ells)
     aux_es = e_star + jax.random.normal(key_aux_e, shape=(T, d_x)) * aux_e_std_devs[:, None] # aux_e_t = e_star_t + N(0, 0.5 * ell_t * I)
     eps_es = jax.random.normal(key_proposals_e, shape=(T, N + 1, d_x))
