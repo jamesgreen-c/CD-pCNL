@@ -191,27 +191,18 @@ def plot_esjd(data, dirpath):
     """
     
     """
-    esjd_us = data["esjd_us"]  # (K, steps)
-    esjd_es = data["esjd_es"]  # (K, steps)
+    esjd = data["esjd"]  # (K, steps - 1)
+    mean_esjd = esjd.sum(axis=1).mean()
 
-    mean_esjd_u = esjd_us[:, 1:].sum(axis=1).mean()
-    mean_esjd_e = esjd_es.sum(axis=1).mean()
-    print("Mean ESJD us: ", mean_esjd_u)
-    print("Mean ESJD es: ", mean_esjd_e)
+    print("Mean ESJD: ", mean_esjd)
 
-    esjd_us = esjd_us[args.i]  # (steps, )
-    esjd_es = esjd_es[args.i]  # (steps, )
+    esjd = esjd[args.i]  # (steps, )
 
-    fig, ax = plt.subplots(2, 1, figsize=(15, 10))
-    ax[0].plot(Ts, esjd_us)
-    ax[0].set_xlabel("t")
-    ax[0].set_ylabel("ESJD")
-    ax[0].set_title("ESJD for driving Brownian motions (u's)")
-
-    ax[1].plot(Ts, esjd_es)
-    ax[1].set_xlabel("t")
-    ax[1].set_ylabel("ESJD")
-    ax[1].set_title("ESJD for end points (e's)")
+    fig, ax = plt.subplots(1, 1, figsize=(15, 5))
+    ax.plot(Ts[1:], esjd)
+    ax.set_xlabel("t")
+    ax.set_ylabel("ESJD")
+    ax.set_title("ESJD for driving Brownian motions (u's)")
 
     plt.tight_layout()
     fig.savefig(f"{dirpath}/esjd.png", dpi=200, bbox_inches="tight")
@@ -227,7 +218,7 @@ def plot_esjd(data, dirpath):
 DS = (1, 5, 10, 50, 100, )
 TS = (10,)
 STEPS = (10, 50, 100, 150, 200,)
-MESH_NUMS = (5, 10, 25, 50, 75, 100,)
+MESH_NUMS = (5, 10, 25, 50, 100, 200,)
 RHOS = (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0,)
 
 KERNELS = (
@@ -243,20 +234,14 @@ STYLES = (
 # --- functions ---
 def _mean_esjd(data):
     """
-    Returns mean ESJD for u and e.
+    Returns mean ESJD.
 
     Notes
     -----
-    esjd_us has shape (K, steps). The zeroth u index is ignored.
-    esjd_es has shape (K, steps).
+    esjd has shape (K, steps - 1).
     """
-    esjd_us = data["esjd_us"]  # (K, steps)
-    esjd_es = data["esjd_es"]  # (K, steps)
-
-    esjd_u = esjd_us[:, 1:].sum(axis=1).mean()
-    esjd_e = esjd_es.sum(axis=1).mean()
-
-    return esjd_u, esjd_e
+    esjd = data["esjd"]  # (K, steps)
+    return esjd.sum(axis=1).mean()
 
 
 def _plot_esjd_against(
@@ -271,13 +256,12 @@ def _plot_esjd_against(
         mesh_num: int = 50,
         rho: float = 0.5,
     ):
-    fig, ax = plt.subplots(2, 1, figsize=(15, 10), sharex=True)
+    fig, ax = plt.subplots(1, 1, figsize=(15, 10), sharex=True)
 
     for kern, style in zip(KERNELS, STYLES):
 
         xs = []
-        esjd_u_vals = []
-        esjd_e_vals = []
+        esjd_vals = []
 
         for j, value in enumerate(values):
 
@@ -311,27 +295,21 @@ def _plot_esjd_against(
 
             xs.append(value)
             if data is None:
-                esjd_u_vals.append(np.nan)
-                esjd_e_vals.append(np.nan)
+                esjd_vals.append(np.nan)
             else:
-                esjd_u, esjd_e = _mean_esjd(data)
-                esjd_u_vals.append(esjd_u)
-                esjd_e_vals.append(esjd_e)
+                mean_esjd = _mean_esjd(data)
+                esjd_vals.append(mean_esjd)
 
         # skip this kernel/style if no data was loaded
         if len(xs) == 0:
             continue
 
         label = f"Kernel: {kern.name}, style={style}"
-        ax[0].plot(values, esjd_u_vals, marker="o", label=label)
-        ax[1].plot(values, esjd_e_vals, marker="o", label=label)
+        ax.plot(values, esjd_vals, marker="o", label=label)
 
-    ax[0].set_ylabel("Mean ESJD: $u$")
-    ax[1].set_ylabel("Mean ESJD: $e$")
-    ax[1].set_xlabel(xlabel)
-
-    ax[0].legend()
-    ax[1].legend()
+    ax.set_ylabel("Mean ESJD")
+    ax.set_xlabel(xlabel)
+    ax.legend()
 
     plt.tight_layout()
     fig.savefig(f"{dirpath}/{filename}", dpi=200, bbox_inches="tight")

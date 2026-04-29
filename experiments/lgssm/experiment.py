@@ -12,6 +12,8 @@ import tqdm
 
 from experiments.lgssm.kernels import KernelType, get_csmc_kernel
 from experiments.lgssm.model import get_data, get_dynamics
+
+from cd_ssm import bridge
 from cd_ssm.utils.common import force_move, barker_move
 from cd_ssm.utils.kalman import sampling, filtering
 from cd_ssm.utils.resamplings import killing, multinomial
@@ -32,11 +34,11 @@ parser.add_argument("--phi", dest="phi", type=float, default=0.8)
 parser.add_argument("--rho", dest="rho", type=float, default=0.5)
 
 parser.add_argument("--steps", type=int, default=100)
-parser.add_argument("--mesh-num", dest="mesh_num", type=int, default=100)
+parser.add_argument("--mesh-num", dest="mesh_num", type=int, default=50)
 
-parser.add_argument("--delta", dest="delta", type=float, default=1.)
-parser.add_argument("--delta-scale", dest="delta_scale", type=float, default=1 / 3)
-parser.add_argument("--delta-arg", dest="delta_arg", type=str, default="na")
+parser.add_argument("--delta", dest="delta", type=float, default=.5)
+parser.add_argument("--delta-scale", dest="delta_scale", type=float, default=1/3)
+parser.add_argument("--delta-arg", dest="delta_arg", type=str, default="D")
 parser.add_argument("--seed", dest="seed", type=int, default=1234)
 parser.add_argument("--kernel", dest="kernel", type=int, default=KernelType.CSMC)
 parser.add_argument("--style", dest="style", type=str, default="guided")
@@ -113,6 +115,7 @@ SIGMA = 10 ** (args.log_var / 2)
 PHI = args.phi
 DTs = jnp.repeat(args.T / args.steps, args.steps)
 # DTs = jnp.repeat(args.T / args.T, args.T)  # make dt = 1 so we can easily use kalman filter
+Ts = jnp.cumsum(DTs)
 DRIFT, DIFFUSION = get_dynamics(PHI, SIGMA)
 
 def tic_fn(arr):
@@ -120,7 +123,7 @@ def tic_fn(arr):
     return np.array(time_elapsed, dtype=arr.dtype), arr
 
 
-# @(jax.jit if not args.debug else lambda x: x)
+@(jax.jit if not args.debug else lambda x: x)
 def one_experiment(key):
     data_key, init_key, sample_key = jax.random.split(key, 3)
 
@@ -151,17 +154,26 @@ def one_experiment(key):
     kernel_ = jax.jit(kernel_)
     init_state = init(init_xs)
 
+    to_path = jax.vmap(lambda u, ep, e, t, dt: bridge.to_path(DIFFUSION, u, ep, e, t, dt))
     def esjd(k_):
         xs, *_ = init_state
         next_xs, *_ = kernel_(k_, init_state, DELTA, RHO)
-        _esjds = tree_map(lambda _xp, _x: jnp.sum((_xp - _x) ** 2, axis=jnp.arange(1, _xp.ndim)), xs, next_xs)
-        return _esjds, next_xs
+        us, es = xs
+        next_us, next_es = next_xs
+
+        # --- map sample back to path space ---
+        path = to_path(us[1:], es[:-1], es[1:], Ts[1:], DTs[1:])  # (T - 1, M, D)
+        next_path = to_path(next_us[1:], next_es[:-1], next_es[1:], Ts[1:], DTs[1:])  # (T - 1, M, D)
+        
+        # --- calculate esjd ---
+        _esjd = jnp.sum((next_path - path) ** 2, axis=(1, 2))
+        return _esjd, next_xs, next_path
 
     sample_keys = jax.random.split(sample_key, args.M)
 
-    (esjd_vals, samples) = jax.vmap(esjd)(sample_keys)
-    esjd_means = tree_map(lambda _sjd: _sjd.mean(0), esjd_vals)
-    return esjd_means, samples, true_xs, ys, init_xs
+    (esjd_vals, samples, sample_paths) = jax.vmap(esjd)(sample_keys)
+    return esjd_vals.mean(0), samples, sample_paths, true_xs, ys, init_xs
+
 
 us_all = np.empty((args.K, args.M, args.steps, args.mesh_num + 1, args.D))
 es_all = np.empty((args.K, args.M, args.steps, args.D))
@@ -170,20 +182,22 @@ true_es_all = np.empty((args.K, args.steps, args.D))
 ys_all = np.empty((args.K, args.steps, args.D))
 init_us_all = np.empty((args.K, args.steps, args.mesh_num + 1, args.D))
 init_es_all = np.empty((args.K, args.steps, args.D))
-esjd_us = np.empty((args.K, args.steps))
-esjd_es = np.empty((args.K, args.steps))
+esjd_all = np.empty((args.K, args.steps - 1))
+paths_all = np.empty((args.K, args.M, args.steps - 1, args.mesh_num, args.D))
 
 for k, key_k in enumerate(tqdm.tqdm(EXPERIMENT_KEYS, desc="Experiment: ")):
-    esjd_k, samples_k, true_xs_k, ys_k, init_xs_k = one_experiment(key_k)
+    esjd_k, samples_k, sample_paths_k, true_xs_k, ys_k, init_xs_k = one_experiment(key_k)
     us_k, es_k = samples_k
-    esjd_us_k, esjd_es_k = esjd_k
     true_us_k, true_es_k = true_xs_k
     init_us_k, init_es_k = init_xs_k
+
     # print(f"True us shape: {true_us_k.shape}")
     # print(f"True es shape: {true_es_k.shape}")
     # print(f"Ys shape: {ys_k.shape}")
     # print(f"Init us shape: {init_us_k.shape}")
     # print(f"Init es shape: {init_es_k.shape}")
+    # print(sample_paths_k.shape)
+    # print(esjd_k.shape)
 
     us_all[k] = us_k
     es_all[k] = es_k
@@ -192,8 +206,8 @@ for k, key_k in enumerate(tqdm.tqdm(EXPERIMENT_KEYS, desc="Experiment: ")):
     ys_all[k] = ys_k
     init_us_all[k] = init_us_k
     init_es_all[k] = init_es_k
-    esjd_us[k] = esjd_us_k
-    esjd_es[k] = esjd_es_k
+    esjd_all[k] = esjd_k
+    paths_all[k] = sample_paths_k
 
 if not os.path.exists("results"):
     os.mkdir("results")
@@ -218,8 +232,8 @@ if not os.path.exists(dirpath):
 datapath = f"{dirpath}/data.npz"
 np.savez_compressed(
     datapath, 
-    esjd_us=esjd_us,
-    esjd_es=esjd_es,
+    esjd=esjd_all,
+    paths=paths_all,
     us=us_all,
     es=es_all,
     true_us=true_us_all,

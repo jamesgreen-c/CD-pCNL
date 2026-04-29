@@ -39,7 +39,7 @@ def results_exist(*, kernel, style, rho, D, steps, mesh_num, args) -> bool:
 DS = (1, 5, 10, 50, 100, )
 TS = (10,)
 STEPS = (10, 50, 100, 150, 200,)
-MESH_NUMS = (5, 10, 25, 50, 75, 100,)
+MESH_NUMS = (5, 10, 25, 50, 100, 200, )
 
 RHOS = (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0,)
 
