@@ -417,8 +417,8 @@ if not args.grouped:
         args.mesh_num,
         args.steps
     )
-    # plot_particles(data, dirpath)
-    # plot_paths(data, dirpath)
+    plot_particles(data, dirpath)
+    plot_paths(data, dirpath)
     plot_esjd(data, dirpath)
 
 else: 
