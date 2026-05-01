@@ -31,14 +31,18 @@ parser.add_argument("--M", dest="M", type=int, default=5)
 
 parser.add_argument("--log-var", dest="log_var", type=float, default=0)
 parser.add_argument("--phi", dest="phi", type=float, default=0.8)
-parser.add_argument("--rho", dest="rho", type=float, default=0.5)
 
 parser.add_argument("--steps", type=int, default=100)
 parser.add_argument("--mesh-num", dest="mesh_num", type=int, default=50)
 
+parser.add_argument("--rho", dest="rho", type=float, default=.5)
+parser.add_argument("--rho-scale", dest="rho_scale", type=float, default=1/3)
+parser.add_argument("--rho-arg", dest="rho_arg", type=str, default="D")
+
 parser.add_argument("--delta", dest="delta", type=float, default=.5)
 parser.add_argument("--delta-scale", dest="delta_scale", type=float, default=1/3)
 parser.add_argument("--delta-arg", dest="delta_arg", type=str, default="D")
+
 parser.add_argument("--seed", dest="seed", type=int, default=1234)
 parser.add_argument("--kernel", dest="kernel", type=int, default=KernelType.CSMC)
 parser.add_argument("--style", dest="style", type=str, default="guided")
@@ -83,6 +87,16 @@ NOW = time.time()
 KEY = jax.random.PRNGKey(args.seed)
 EXPERIMENT_KEYS = jax.random.split(KEY, args.K)
 
+
+if args.rho_arg == "D":
+    RHO = args.rho / args.D ** args.rho_scale
+elif args.rho_arg == "T":
+    RHO = args.rho / args.T ** args.rho_scale
+elif args.rho_arg == "DT" or args.rho_arg == "TD":
+    RHO = args.rho / (args.D * args.T) ** args.rho_scale
+else:
+    RHO = args.rho
+
 if args.delta_arg == "D":
     DELTA = args.delta / args.D ** args.delta_scale
 elif args.delta_arg == "T":
@@ -92,7 +106,6 @@ elif args.delta_arg == "DT" or args.delta_arg == "TD":
 else:
     DELTA = args.delta
 
-RHO = args.rho
 
 if args.resampling == "killing":
     resampling_fn = killing
@@ -117,6 +130,7 @@ DTs = jnp.repeat(args.T / args.steps, args.steps)
 # DTs = jnp.repeat(args.T / args.T, args.T)  # make dt = 1 so we can easily use kalman filter
 Ts = jnp.cumsum(DTs)
 DRIFT, DIFFUSION = get_dynamics(PHI, SIGMA)
+OBS_SIGMA = 0.2
 
 def tic_fn(arr):
     time_elapsed = time.time() - NOW
@@ -127,10 +141,10 @@ def tic_fn(arr):
 def one_experiment(key):
     data_key, init_key, sample_key = jax.random.split(key, 3)
 
-    true_xs, ys, *_ = get_data(data_key, PHI, SIGMA, args.D, DTs, args.mesh_num)
+    true_xs, ys, *_ = get_data(data_key, PHI, SIGMA, OBS_SIGMA, args.D, DTs, args.mesh_num, )
 
     csmc_kernel, csmc_init, *_ = get_csmc_kernel(
-        ys, DRIFT, DIFFUSION, SIGMA, N=args.N,
+        ys, DRIFT, DIFFUSION, SIGMA, OBS_SIGMA, N=args.N,
         num=args.mesh_num, dts=DTs,
         resampling_func=resampling_fn,
         backward=True,
@@ -142,7 +156,7 @@ def one_experiment(key):
     init_xs, *_ = csmc_kernel(init_key, csmc_init(true_xs), None)
 
     kernel_, init, *_ = kernel_type.kernel_maker(
-        ys, DRIFT, DIFFUSION, SIGMA, N=args.N,
+        ys, DRIFT, DIFFUSION, SIGMA, OBS_SIGMA, N=args.N,
         num=args.mesh_num, dts=DTs,
         resampling_func=resampling_fn,
         backward=args.backward,

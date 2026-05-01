@@ -47,7 +47,7 @@ class KernelType(Enum):
 #######################
 
 
-def get_csmc_kernel(ys, drift: Callable, diffusion: Callable, sigma, N, num, dts, style="guided", **kwargs):
+def get_csmc_kernel(ys, drift: Callable, diffusion: Callable, sigma, obs_sigma, N, num, dts, style="guided", **kwargs):
     """
     Implementation of a conditional sequential Monte Carlo kernel for continuous-discrete state-space models.
     Uses guided bridge proposals for the forward particle system and then applies a backward pass to sample
@@ -101,14 +101,14 @@ def get_csmc_kernel(ys, drift: Callable, diffusion: Callable, sigma, N, num, dts
 
         def Gamma_0(z):
             _, e = z
-            return norm.logpdf(ys[0], loc=e).sum(axis=-1) + M0_logpdf(z)
+            return norm.logpdf(ys[0], loc=e, scale=obs_sigma).sum(axis=-1) + M0_logpdf(z)
 
         def Gamma_t(z_t_m_1, z_t, params):
             y_t, t, dt = params
             _, e_t_m_1 = z_t_m_1
             u_t, e_t = z_t
             x_t = bridge.to_path(diffusion, u_t, e_t_m_1, e_t, t, dt)
-            return log_potential(x_t, e_t_m_1, y_t, drift, diffusion, t, dt)
+            return log_potential(x_t, e_t_m_1, y_t, drift, diffusion, t, dt, obs_sigma)
         
     else:
         raise NotImplementedError(f"Unknown style: {style}, choose from 'guided'")
@@ -127,7 +127,7 @@ def get_csmc_kernel(ys, drift: Callable, diffusion: Callable, sigma, N, num, dts
     return kernel, init, sampling_routine_fn
 
 
-def get_filter_csmc_kernel(ys, drift: Callable, diffusion: Callable, sigma, N, num, dts, style="guided", **kwargs):
+def get_filter_csmc_kernel(ys, drift: Callable, diffusion: Callable, sigma, obs_sigma, N, num, dts, style="guided", **kwargs):
     """
     Implementation of a forward-only conditional sequential Monte Carlo kernel for continuous-discrete
     state-space models. Uses guided bridge proposals to generate weighted particles approximating the
@@ -180,14 +180,14 @@ def get_filter_csmc_kernel(ys, drift: Callable, diffusion: Callable, sigma, N, n
 
         def Gamma_0(z):
             _, e = z
-            return norm.logpdf(ys[0], loc=e).sum(axis=-1) + M0_logpdf(z)
+            return norm.logpdf(ys[0], loc=e, scale=obs_sigma).sum(axis=-1) + M0_logpdf(z)
 
         def Gamma_t(z_t_m_1, z_t, params):
             y_t, t, dt = params
             _, e_t_m_1 = z_t_m_1
             u_t, e_t = z_t
             x_t = bridge.to_path(diffusion, u_t, e_t_m_1, e_t, t, dt)
-            return log_potential(x_t, e_t_m_1, y_t, drift, diffusion, t, dt)
+            return log_potential(x_t, e_t_m_1, y_t, drift, diffusion, t, dt, obs_sigma)
         
     else:
         raise NotImplementedError(f"Unknown style: {style}, choose from 'guided'")
@@ -207,7 +207,7 @@ def get_filter_csmc_kernel(ys, drift: Callable, diffusion: Callable, sigma, N, n
 
 
 
-def get_pcn_csmc_kernel(ys, drift: Callable, diffusion: Callable, sigma, N, num, dts, style="na", **kwargs):
+def get_pcn_csmc_kernel(ys, drift: Callable, diffusion: Callable, sigma, obs_sigma, N, num, dts, style="na", **kwargs):
     """
     Kernel constructor for CD-pCN kernel.  
 
@@ -242,14 +242,14 @@ def get_pcn_csmc_kernel(ys, drift: Callable, diffusion: Callable, sigma, N, num,
 
         def Gamma_0(z):
             _, e = z
-            return norm.logpdf(ys[0], loc=e).sum(axis=-1) + M0_logpdf(z)
+            return norm.logpdf(ys[0], loc=e, scale=obs_sigma).sum(axis=-1) + M0_logpdf(z)
 
         def Gamma_t(z_t_m_1, z_t, params):
             y_t, t, dt = params
             _, e_t_m_1 = z_t_m_1
             u_t, e_t = z_t
             x_t = bridge.to_path(diffusion, u_t, e_t_m_1, e_t, t, dt)
-            return log_potential(x_t, e_t_m_1, y_t, drift, diffusion, t, dt) # bug (not needed): + Mt_logpdf(z_t_m_1, z_t, params)
+            return log_potential(x_t, e_t_m_1, y_t, drift, diffusion, t, dt, obs_sigma) # bug (not needed): + Mt_logpdf(z_t_m_1, z_t, params)
         
     else:
         raise NotImplementedError(f"Unknown style: {style}, choose from: 'na', TODO - 'langevin")
