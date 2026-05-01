@@ -36,12 +36,14 @@ def results_exist(*, kernel, style, rho, D, steps, mesh_num, args) -> bool:
     return os.path.exists(datapath)
 
 
-DS = (1, 5, 10, 50, 100, )
+DS = (1, 5, 10, 25, 50, 75, 100, )
 TS = (10,)
-STEPS = (10, 50, 100, 150, 200,)
-MESH_NUMS = (5, 10, 25, 50, 100, 200, )
+STEPS = (100, )
+MESH_NUMS = (10, )
 
-RHOS = (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0,)
+# STEPS = (10, 50, 100, 150, 200,)
+# MESH_NUMS = (5, 10, 25, 50, 100, 200, )
+# RHOS = (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0,)
 
 KERNELS = (
     KernelType.CSMC,
@@ -53,7 +55,7 @@ STYLES = (
     'na',
 )
 
-combination = list(product(DS, TS, STEPS, MESH_NUMS, RHOS, zip(KERNELS, STYLES)))
+combination = list(product(DS, TS, STEPS, MESH_NUMS, zip(KERNELS, STYLES)))
 print(f"Number of experiments: {len(combination)}")
 
 if args.i != -1 and not (0 <= args.i < len(combination)):
