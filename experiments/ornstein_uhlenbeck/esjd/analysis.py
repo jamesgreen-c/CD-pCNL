@@ -11,8 +11,8 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 
-from experiments.lgssm.model import get_dynamics
-from experiments.lgssm.kernels import KernelType
+from experiments.ornstein_uhlenbeck.model import get_dynamics
+from experiments.ornstein_uhlenbeck.kernels import KernelType
 
 from cd_ssm import bridge
 from cd_ssm.utils.printing import ctext

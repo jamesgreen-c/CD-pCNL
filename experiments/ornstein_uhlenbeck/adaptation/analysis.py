@@ -11,8 +11,8 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 
-from experiments.lgssm_adaptation.model import get_dynamics
-from experiments.lgssm_adaptation.kernels import KernelType
+from experiments.ornstein_uhlenbeck.model import get_dynamics
+from experiments.ornstein_uhlenbeck.kernels import KernelType
 
 from cd_ssm import bridge
 from cd_ssm.utils.printing import ctext
@@ -74,8 +74,7 @@ def plot_adaptation(data, dirpath):
 ##############################
 #  Group analysis functions  #
 ##############################
-DS = (1, 5, 10, 25, 50, 100, )
-STEPS = (10, 50, 100, 150, 200,)
+DS = (1, 5, 10, 20, 30, 40, 50, 75, 100, )
 
 
 def plot_adaptation_with_d(dirpath, t: int = 10, steps: int = 100, mesh: int = 50):
@@ -100,21 +99,23 @@ def plot_adaptation_with_d(dirpath, t: int = 10, steps: int = 100, mesh: int = 5
 
     fig, ax = plt.subplots(2, 1, figsize=(15, 10))
     
+    print(rhos[-1])
+    print(deltas[-1])
     ref1 = np.log(np.array(DS))
-    ref2 = np.log(np.array(DS) **(1/3))
+    ref2 = np.array(DS) **(1/3)
+    rhos = np.asarray(rhos)
 
-
-    ax[0].plot(DS, rhos, label="log rho")
-    ax[0].plot(DS, ref1, label="log D")
-    ax[0].plot(DS, ref2, label="log (D**1/3)")
-    ax[0].set_ylabel("Final log rho after adaptation")
+    ax[0].plot(ref1, np.log(1 - rhos), label="rho")
+    # ax[0].plot(DS, ref1, label="D")
+    # ax[0].plot(DS, ref2, label="D**1/3")
+    ax[0].set_ylabel("Final rho after adaptation")
     ax[0].set_xlabel("D")
     ax[0].legend()
 
-    ax[1].plot(DS, deltas, label="log delta")
-    ax[1].plot(DS, - ref1, label="log 1/D")
-    ax[1].plot(DS, - ref2, label="log 1/(D**1/3)")
-    ax[1].set_ylabel("Final log delta after adaptation")
+    ax[1].plot(ref1, np.log(deltas), label="delta")
+    # ax[1].plot(DS, - ref1, label="1/D")
+    # ax[1].plot(DS, 1/ ref2, label="1/(D**1/3)")
+    ax[1].set_ylabel("Final delta after adaptation")
     ax[1].set_xlabel("D")
     ax[1].legend()
 

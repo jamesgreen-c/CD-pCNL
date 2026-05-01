@@ -10,8 +10,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import tqdm
 
-from experiments.lgssm.kernels import KernelType, get_csmc_kernel
-from experiments.lgssm.model import get_data, get_dynamics
+from experiments.ornstein_uhlenbeck.kernels import KernelType, get_csmc_kernel
+from experiments.ornstein_uhlenbeck.model import get_data, get_dynamics
 
 from cd_ssm import bridge
 from cd_ssm.utils.common import force_move, barker_move
@@ -244,6 +244,7 @@ if not os.path.exists(dirpath):
     os.mkdir(dirpath)
 
 datapath = f"{dirpath}/data.npz"
+print(datapath)
 np.savez_compressed(
     datapath, 
     esjd=esjd_all,

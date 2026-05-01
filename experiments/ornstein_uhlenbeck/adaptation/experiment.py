@@ -10,8 +10,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import tqdm
 
-from experiments.lgssm_adaptation.kernels import KernelType, get_csmc_kernel
-from experiments.lgssm_adaptation.model import get_data, get_dynamics
+from experiments.ornstein_uhlenbeck.kernels import KernelType, get_csmc_kernel
+from experiments.ornstein_uhlenbeck.model import get_data, get_dynamics
 from cd_ssm.utils.common import force_move, barker_move
 from cd_ssm.utils.kalman import sampling, filtering
 from cd_ssm.utils.resamplings import killing, multinomial
@@ -124,16 +124,17 @@ SIGMA = 10 ** (args.log_var / 2)
 PHI = args.phi
 DTs = jnp.repeat(args.T / args.steps, args.steps)
 DRIFT, DIFFUSION = get_dynamics(PHI, SIGMA)
+OBS_SIGMA = 0.2
 
 
-# @(jax.jit if not args.debug else lambda x: x)
+@(jax.jit if not args.debug else lambda x: x)
 def one_experiment(key):
     data_key, init_key, adaptation_key, sample_key = jax.random.split(key, 4)
 
-    true_xs, ys, *_ = get_data(data_key, PHI, SIGMA, args.D, DTs, args.mesh_num)
+    true_xs, ys, *_ = get_data(data_key, PHI, SIGMA, OBS_SIGMA, args.D, DTs, args.mesh_num)
 
     csmc_kernel, csmc_init, *_ = get_csmc_kernel(
-        ys, DRIFT, DIFFUSION, SIGMA, N=args.N,
+        ys, DRIFT, DIFFUSION, SIGMA, OBS_SIGMA, N=args.N,
         num=args.mesh_num, dts=DTs,
         resampling_func=resampling_fn,
         backward=True,
@@ -145,7 +146,7 @@ def one_experiment(key):
     init_xs, *_ = csmc_kernel(init_key, csmc_init(true_xs), None)
 
     kernel, init, adaptation_loop, *_ = kernel_type.kernel_maker(
-        ys, DRIFT, DIFFUSION, SIGMA, N=args.N,
+        ys, DRIFT, DIFFUSION, SIGMA, OBS_SIGMA, N=args.N,
         num=args.mesh_num, dts=DTs,
         resampling_func=resampling_fn,
         backward=args.backward,
