@@ -55,7 +55,7 @@ def integrate_dx(a: Array, b: Array, f: Callable, xs: Array):
 
 def integrate_dcov_inv(a: Array, b: Array, f: Callable, cov: Callable, xs: Array):
     """
-    Implementation of a left-point Riemann-Stieltjes approximation scheme for covariance integrals
+    Implementation of a right-point Riemann-Stieltjes approximation scheme for covariance integrals
     involving functions of discretised SDE paths.
 
     Parameters
@@ -74,10 +74,10 @@ def integrate_dcov_inv(a: Array, b: Array, f: Callable, cov: Callable, xs: Array
     dt = (b - a) / num
     ts = a + jnp.arange(num + 1) * dt
     
-    cov_invs = vmap(lambda t, x: jnp.linalg.inv(cov(t, x)))(ts, xs)
+    cov_invs = vmap(lambda t, x: jnp.linalg.inv(cov(t, x)))(ts[:-1], xs[:-1])
     dcov_invs = cov_invs[1:] - cov_invs[:-1]
     
-    fs = vmap(f)(ts[:-1], xs[:-1])
+    fs = vmap(f)(ts[1:-1], xs[1:-1])
     return jnp.einsum("ni,nij,nj->", fs, dcov_invs, fs)
 
 

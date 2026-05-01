@@ -28,18 +28,19 @@ def get_dynamics(phi: float, sigma: float):
     return drift, diffusion
 
 
-@partial(jax.jit, static_argnums=(3, 5))
+@partial(jax.jit, static_argnums=(4, 6))
 def get_data(
         key: PRNGKey, 
         phi: float, 
-        sigma: float, 
+        x_sigma: float, 
+        y_sigma: float,
         dim: int, 
         dts: Array,
         num: int
     ):
     """
     Produce continuous time LGSSM data where
-        dX_t = -phi X_t dt + sigma dW_t
+        dX_t = -phi X_t dt + x_sigma dW_t
         Y_k | X_{t_k} ~ N(X_{t_k}, I)
     where dts[k] = t_{k+1} - t_k.
 
@@ -47,7 +48,7 @@ def get_data(
     ----------
     key:   PRNGKey
     phi:   Persistence parameter
-    sigma: Standard deviation of prior dynamics
+    x_sigma: Standard deviation of prior dynamics
     dim:   Dimension of latent state
     dts:   (K,)  The time deltas for all K steps
     num:   The number of discretisation steps for each path at time t
@@ -64,8 +65,8 @@ def get_data(
     K = dts.shape[0]  # number of timesteps rather than horizon time
 
     # needed for exact smoothing on endpoints if useful
-    chol_P0 = (sigma / jnp.sqrt(2 * phi))
-    chol_Qs = sigma * jnp.sqrt((1.0 - jnp.exp(-2.0 * phi * dts)) / (2.0 * phi))
+    chol_P0 = (x_sigma / jnp.sqrt(2 * phi))
+    chol_Qs = x_sigma * jnp.sqrt((1.0 - jnp.exp(-2.0 * phi * dts)) / (2.0 * phi))
     As = jnp.exp(-phi * dts)
 
     ep_0 = jnp.zeros((dim,))
@@ -78,7 +79,7 @@ def get_data(
     eps_es, eps_ys = jax.random.normal(sampling_key, (2, K, dim))
     def body(e_k, inps):
         eps_e, eps_y, At, Qt = inps
-        y_k = e_k + 0.2 * eps_y
+        y_k = e_k + y_sigma * eps_y
         e_kp1 = At * e_k + Qt * eps_e
         return e_kp1, (e_k, y_k)
     
@@ -87,17 +88,17 @@ def get_data(
     return xs, ys, As, chol_Qs, chol_P0
 
 
-@partial(jnp.vectorize, signature="(m,d),(d)->()", excluded=(2, 3, 4, 5, 6))
-def log_potential(x, ep, y, drift: Callable, diffusion: Callable, t: Array, dt: Array):
+@partial(jnp.vectorize, signature="(m,d),(d)->()", excluded=(2, 3, 4, 5, 6, 7))
+def log_potential(x, ep, y, drift: Callable, diffusion: Callable, t: Array, dt: Array, obs_sigma: float):
     e = x[-1]
 
     def _cov(t, x):
         sig = diffusion(t, x) * jnp.eye(x.shape[0])
         return sig @ sig.T
     
-    val = norm.logpdf(y, e).sum()
-    val += norm.logpdf(e, ep, scale=diffusion(0, ep)).sum()
-    val += 0.5 * (logdet(_cov(0, ep)) - logdet(_cov(dt, e)))
+    val = norm.logpdf(y, e, scale=obs_sigma).sum()
+    val += norm.logpdf(e, ep, scale=jnp.sqrt(dt) * diffusion(t, ep)).sum()
+    val += 0.5 * (logdet(_cov(t, ep)) - logdet(_cov(t + dt, e)))
     val += delyonhu(x, drift, diffusion, t, dt)
     return val
 
