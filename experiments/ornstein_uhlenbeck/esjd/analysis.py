@@ -268,7 +268,6 @@ def _plot_esjd_against(
             T_j = T
             steps_j = steps
             mesh_num_j = mesh_num
-            rho_j = rho
 
             if xlabel == "D":
                 D_j = value
@@ -286,7 +285,6 @@ def _plot_esjd_against(
             data, _ = load_data(
                 kern,
                 style,
-                rho_j,
                 D_j,
                 mesh_num_j,
                 steps_j,
@@ -325,34 +323,34 @@ def plot_esjd_against_d(
     _plot_esjd_against(dirpath, DS, "D", "esjd_vs_d.png", T=T, steps=steps, mesh_num=mesh_num, rho=rho,)
 
 
-def plot_esjd_against_steps(
-        dirpath,
-        D: int = 10,
-        T: int = 10,
-        mesh_num: int = 50,
-        rho: float = 0.5,
-    ):
-    _plot_esjd_against(dirpath, STEPS, "Steps", "esjd_vs_steps.png", D=D, T=T, mesh_num=mesh_num, rho=rho,)
+# def plot_esjd_against_steps(
+#         dirpath,
+#         D: int = 10,
+#         T: int = 10,
+#         mesh_num: int = 50,
+#         rho: float = 0.5,
+#     ):
+#     _plot_esjd_against(dirpath, STEPS, "Steps", "esjd_vs_steps.png", D=D, T=T, mesh_num=mesh_num, rho=rho,)
 
 
-def plot_esjd_against_rho(
-        dirpath,
-        D: int = 10,
-        T: int = 10,
-        steps: int = 100,
-        mesh_num: int = 50,
-    ):
-    _plot_esjd_against(dirpath, RHOS, "Rho", "esjd_vs_rho.png", D=D, T=T, steps=steps, mesh_num=mesh_num,)
+# def plot_esjd_against_rho(
+#         dirpath,
+#         D: int = 10,
+#         T: int = 10,
+#         steps: int = 100,
+#         mesh_num: int = 50,
+#     ):
+#     _plot_esjd_against(dirpath, RHOS, "Rho", "esjd_vs_rho.png", D=D, T=T, steps=steps, mesh_num=mesh_num,)
 
 
-def plot_esjd_against_mesh_num(
-        dirpath,
-        D: int = 10,
-        T: int = 10,
-        steps: int = 100,
-        rho: float = 0.5,
-    ):
-    _plot_esjd_against(dirpath, MESH_NUMS, "Mesh number", "esjd_vs_mesh_num.png", D=D, T=T, steps=steps, rho=rho,)
+# def plot_esjd_against_mesh_num(
+#         dirpath,
+#         D: int = 10,
+#         T: int = 10,
+#         steps: int = 100,
+#         rho: float = 0.5,
+#     ):
+#     _plot_esjd_against(dirpath, MESH_NUMS, "Mesh number", "esjd_vs_mesh_num.png", D=D, T=T, steps=steps, rho=rho,)
 
 
 
@@ -388,7 +386,6 @@ if not args.grouped:
     data, dirpath = load_data(
         kernel_type,
         args.style,
-        RHO,
         args.D,
         args.mesh_num,
         args.steps
@@ -401,9 +398,8 @@ else:
 
     dirpath="results"
     plot_esjd_against_d(dirpath)
-    plot_esjd_against_steps(dirpath)
-    plot_esjd_against_mesh_num(dirpath)
-    plot_esjd_against_rho(dirpath)
+    # plot_esjd_against_steps(dirpath)
+    # plot_esjd_against_mesh_num(dirpath)
 
 
 
