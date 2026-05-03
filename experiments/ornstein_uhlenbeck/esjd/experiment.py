@@ -33,14 +33,14 @@ parser.add_argument("--log-var", dest="log_var", type=float, default=0)
 parser.add_argument("--phi", dest="phi", type=float, default=0.8)
 
 parser.add_argument("--steps", type=int, default=100)
-parser.add_argument("--mesh-num", dest="mesh_num", type=int, default=50)
+parser.add_argument("--mesh-num", dest="mesh_num", type=int, default=10)
 
-parser.add_argument("--rho", dest="rho", type=float, default=.5)
-parser.add_argument("--rho-scale", dest="rho_scale", type=float, default=1/3)
+parser.add_argument("--rho", dest="rho", type=float, default=.25)
+parser.add_argument("--rho-scale", dest="rho_scale", type=float, default=1/5)
 parser.add_argument("--rho-arg", dest="rho_arg", type=str, default="D")
 
-parser.add_argument("--delta", dest="delta", type=float, default=.5)
-parser.add_argument("--delta-scale", dest="delta_scale", type=float, default=1/3)
+parser.add_argument("--delta", dest="delta", type=float, default=1)
+parser.add_argument("--delta-scale", dest="delta_scale", type=float, default=1)
 parser.add_argument("--delta-arg", dest="delta_arg", type=str, default="D")
 
 parser.add_argument("--seed", dest="seed", type=int, default=1234)
@@ -87,13 +87,13 @@ NOW = time.time()
 KEY = jax.random.PRNGKey(args.seed)
 EXPERIMENT_KEYS = jax.random.split(KEY, args.K)
 
-
+rho_m1 = 1 - args.rho
 if args.rho_arg == "D":
-    RHO = args.rho / args.D ** args.rho_scale
+    RHO = 1 - (rho_m1 / args.D ** args.rho_scale)
 elif args.rho_arg == "T":
-    RHO = args.rho / args.T ** args.rho_scale
+    RHO = 1 - (rho_m1 / args.T ** args.rho_scale)
 elif args.rho_arg == "DT" or args.rho_arg == "TD":
-    RHO = args.rho / (args.D * args.T) ** args.rho_scale
+    RHO = 1 - (rho_m1 / (args.D * args.T) ** args.rho_scale)
 else:
     RHO = args.rho
 
