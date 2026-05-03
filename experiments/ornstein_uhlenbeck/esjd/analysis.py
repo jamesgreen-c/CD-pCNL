@@ -215,11 +215,10 @@ def plot_esjd(data, dirpath):
 ##############################
 
 # --- arguments ---
-DS = (1, 5, 10, 50, 100, )
+DS = (1, 5, 10, 25, 50, 75, 100, )
 TS = (10,)
-STEPS = (10, 50, 100, 150, 200,)
-MESH_NUMS = (5, 10, 25, 50, 100, 200,)
-RHOS = (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0,)
+STEPS = (100, )
+MESH_NUMS = (10, )
 
 KERNELS = (
     KernelType.CSMC,
@@ -361,12 +360,11 @@ def plot_esjd_against_mesh_num(
 #  load data function  #
 ########################
 
-def load_data(kernel, style, rho, D, mesh_num, steps):
-    experiment_name = "kernel={},style={},rho={},D={},N={},mesh-num={},steps={},M={},seed={}"
+def load_data(kernel, style, D, mesh_num, steps):
+    experiment_name = "kernel={},style={},D={},N={},mesh-num={},steps={},M={},seed={}"
     experiment_name = experiment_name.format(
         kernel.name,
         style,
-        rho,
         D,
         args.N,
         mesh_num,
@@ -379,7 +377,7 @@ def load_data(kernel, style, rho, D, mesh_num, steps):
         print(ctext("No such experiment exists", "yellow"))
         print(experiment_name)
         return None, None 
-        # exit(
+        # exit()
 
     data = np.load(f"{dirpath}/data.npz")
     return data, dirpath
