@@ -226,11 +226,10 @@ for k, key_k in enumerate(tqdm.tqdm(EXPERIMENT_KEYS, desc="Experiment: ")):
 if not os.path.exists("results"):
     os.mkdir("results")
 
-experiment_name = "kernel={},style={},rho={},D={},N={},mesh-num={},steps={},M={},seed={}"
+experiment_name = "kernel={},style={},D={},N={},mesh-num={},steps={},M={},seed={}"
 experiment_name = experiment_name.format(
     kernel_type.name,
     args.style,
-    RHO,
     args.D,
     args.N,
     args.mesh_num,
