@@ -163,7 +163,7 @@ def one_experiment(key):
         adaptation_key, init_state, adaptation_kernel,
         TARGET_ALPHA,
         args.delta_init, args.rho_init, 
-        args.adaptation, args.verbose,
+        args.adaptation,
         min_delta=MIN_DELTA, max_delta=MAX_DELTA,
         min_rho=MIN_RHO, max_rho=MAX_RHO,
         window_size=ADAPTATION_WINDOW,

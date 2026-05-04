@@ -215,7 +215,7 @@ def plot_esjd(data, dirpath):
 ##############################
 
 # --- arguments ---
-DS = (1, 5, 10, 25, 50, 75, 100, )
+DS = (1, 5, 10, 25, 50, 75, 100, 150, 200, )
 TS = (10,)
 STEPS = (100, )
 MESH_NUMS = (10, )
@@ -252,8 +252,7 @@ def _plot_esjd_against(
         D: int = 10,
         T: int = 10,
         steps: int = 100,
-        mesh_num: int = 50,
-        rho: float = 0.5,
+        mesh_num: int = 10,
     ):
     fig, ax = plt.subplots(1, 1, figsize=(15, 10), sharex=True)
 
@@ -294,7 +293,7 @@ def _plot_esjd_against(
             if data is None:
                 esjd_vals.append(np.nan)
             else:
-                mean_esjd = _mean_esjd(data)
+                mean_esjd = _mean_esjd(data) #  / D_j
                 esjd_vals.append(mean_esjd)
 
         # skip this kernel/style if no data was loaded
@@ -317,10 +316,9 @@ def plot_esjd_against_d(
         dirpath,
         T: int = 10,
         steps: int = 100,
-        mesh_num: int = 50,
-        rho: float = 0.5,
+        mesh_num: int = 10,
     ):
-    _plot_esjd_against(dirpath, DS, "D", "esjd_vs_d.png", T=T, steps=steps, mesh_num=mesh_num, rho=rho,)
+    _plot_esjd_against(dirpath, DS, "D", "esjd_vs_d.png", T=T, steps=steps, mesh_num=mesh_num,)
 
 
 # def plot_esjd_against_steps(
@@ -328,19 +326,8 @@ def plot_esjd_against_d(
 #         D: int = 10,
 #         T: int = 10,
 #         mesh_num: int = 50,
-#         rho: float = 0.5,
 #     ):
-#     _plot_esjd_against(dirpath, STEPS, "Steps", "esjd_vs_steps.png", D=D, T=T, mesh_num=mesh_num, rho=rho,)
-
-
-# def plot_esjd_against_rho(
-#         dirpath,
-#         D: int = 10,
-#         T: int = 10,
-#         steps: int = 100,
-#         mesh_num: int = 50,
-#     ):
-#     _plot_esjd_against(dirpath, RHOS, "Rho", "esjd_vs_rho.png", D=D, T=T, steps=steps, mesh_num=mesh_num,)
+#     _plot_esjd_against(dirpath, STEPS, "Steps", "esjd_vs_steps.png", D=D, T=T, mesh_num=mesh_num,)
 
 
 # def plot_esjd_against_mesh_num(
@@ -348,9 +335,8 @@ def plot_esjd_against_d(
 #         D: int = 10,
 #         T: int = 10,
 #         steps: int = 100,
-#         rho: float = 0.5,
 #     ):
-#     _plot_esjd_against(dirpath, MESH_NUMS, "Mesh number", "esjd_vs_mesh_num.png", D=D, T=T, steps=steps, rho=rho,)
+#     _plot_esjd_against(dirpath, MESH_NUMS, "Mesh number", "esjd_vs_mesh_num.png", D=D, T=T, steps=steps,)
 
 
 

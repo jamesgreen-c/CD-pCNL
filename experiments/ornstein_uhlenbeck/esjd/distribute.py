@@ -37,7 +37,7 @@ def results_exist(*, kernel, style, D, steps, mesh_num, args) -> bool:
     return os.path.exists(datapath)
 
 
-DS = (1, 5, 10, 25, 50, 75, 100, )
+DS = (1, 5, 10, 25, 50, 75, 100, 150, 200, )
 TS = (10,)
 STEPS = (100, )
 MESH_NUMS = (10, )

@@ -13,7 +13,6 @@ def delta_rho_adaptation_routine(
         initial_deltas,
         initial_rhos,
         n_steps,
-        verbose=False,
         min_delta=1e-12,
         max_delta=1e2,
         min_rho=1e-12,
@@ -76,10 +75,6 @@ def delta_rho_adaptation_routine(
     fin_deltas:     Array, shape (T,). Final adapted delta values.
     fin_rhos:       Array, shape (T,). Final adapted rho values.
     """
-    if verbose:
-        decorator = progress_bar_scan(n_steps, show=-1)
-    else:
-        decorator = lambda x: x
     
     init_us, init_es = init_xs
     T = init_us.shape[0]
@@ -100,7 +95,6 @@ def delta_rho_adaptation_routine(
         direction=-1
     )
 
-    @decorator
     def body(carry, inp):
         state, deltas, rhos, deltas_acc_hist, rhos_acc_hist, *_ = carry
         xs, bs = state
