@@ -140,10 +140,14 @@ def get_csmc_kernel(ys, drift: Callable, diffusion: Callable, sigma, obs_sigma, 
     def sampling_routine_fn(key, state, kernel_, n_steps, verbose, get_samples):
         return aux_sampling_routine(key, state[0], state[1], kernel_, n_steps, verbose, get_samples)
 
-    def adaptation_routine(key, state, kernel_, target_acceptance, initial_delta,
-                           n_steps, verbose, **_kwargs):
-        return delta_adaptation_routine(key, state[0], state[1], kernel_, target_acceptance,
-                                        initial_delta, n_steps, verbose, **_kwargs)
+    def adaptation_routine(key, state, kernel_, target_acceptance, initial_delta, initial_rho,
+                         n_steps, **kwargs):
+        return adpt.delta_rho_adaptation_routine(key, state[0], state[1], 
+                                                kernel_, 
+                                                target_acceptance,
+                                                initial_delta, initial_rho,
+                                                n_steps,
+                                                **kwargs)
 
     return kernel, init, adaptation_routine, sampling_routine_fn
 
@@ -224,10 +228,14 @@ def get_filter_csmc_kernel(ys, drift: Callable, diffusion: Callable, sigma, obs_
     def sampling_routine_fn(key, state, kernel_, n_steps, verbose, get_samples):
         return aux_sampling_routine(key, state[0], state[1], kernel_, n_steps, verbose, get_samples)
 
-    def adaptation_routine(key, state, kernel_, target_acceptance, initial_delta,
-                           n_steps, verbose, **_kwargs):
-        return delta_adaptation_routine(key, state[0], state[1], kernel_, target_acceptance,
-                                        initial_delta, n_steps, verbose, **_kwargs)
+    def adaptation_routine(key, state, kernel_, target_acceptance, initial_delta, initial_rho,
+                         n_steps, **kwargs):
+        return adpt.delta_rho_adaptation_routine(key, state[0], state[1], 
+                                                kernel_, 
+                                                target_acceptance,
+                                                initial_delta, initial_rho,
+                                                n_steps,
+                                                **kwargs)
     
     return kernel, init, adaptation_routine, sampling_routine_fn
 
@@ -292,12 +300,12 @@ def get_pcn_csmc_kernel(ys, drift: Callable, diffusion: Callable, sigma, obs_sig
         return aux_sampling_routine(key, state[0], state[1], kernel_, n_steps, verbose, get_samples)
 
     def adaptation_routine(key, state, kernel_, target_acceptance, initial_delta, initial_rho,
-                         n_steps, verbose, **kwargs):
+                         n_steps, **kwargs):
         return adpt.delta_rho_adaptation_routine(key, state[0], state[1], 
                                                 kernel_, 
                                                 target_acceptance,
                                                 initial_delta, initial_rho,
-                                                n_steps, verbose=verbose,
+                                                n_steps,
                                                 **kwargs)
 
     return kernel, init, adaptation_routine, sampling_routine_fn
