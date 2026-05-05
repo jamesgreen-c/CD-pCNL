@@ -47,9 +47,9 @@ parser.add_argument("--phi", dest="phi", type=float, default=0.8)
 parser.add_argument("--steps", type=int, default=100)
 parser.add_argument("--mesh-num", dest="mesh_num", type=int, default=10)
 
-parser.add_argument("--adaptation", dest="adaptation", type=int, default=1)
-parser.add_argument("--burnin", dest="burnin", type=int, default=1)
-parser.add_argument("--n-samples", dest="n_samples", type=int, default=1)
+parser.add_argument("--adaptation", dest="adaptation", type=int, default=500)
+parser.add_argument("--burnin", dest="burnin", type=int, default=0)
+parser.add_argument("--n-samples", dest="n_samples", type=int, default=1000)
 
 parser.add_argument("--rho", dest="rho", type=float, default=.25)
 parser.add_argument("--rho-scale", dest="rho_scale", type=float, default=1/5)
@@ -93,10 +93,13 @@ print(f"""
 #        LGSSM EXPERIMENT        #
 ##################################
 Configuration:
-    - T: {args.T}
-    - kernel: {KernelType(args.kernel).name}
-    - style: {args.style}
-    - D: {args.D}
+    - T:         {args.T}
+    - kernel:    {KernelType(args.kernel).name}
+    - style:     {args.style}
+    - D:         {args.D}
+    - N-samples  {args.n_samples}
+    - Adaptation {args.adaptation}
+    - Burnin     {args.burnin}
 """)
 
 # BACKEND CONFIG
@@ -196,7 +199,7 @@ def one_experiment(key):
     )
     adaptation_kernel = jax.jit(kernel)
 
-    adaptation_loop = jax.jit(adaptation_loop, static_argnums=(2, 5, 6), static_argnames=("window_size", "target_stat", "shared_delta", "shared_rho"))
+    adaptation_loop = jax.jit(adaptation_loop, static_argnums=(2, 6), static_argnames=("window_size", "target_stat", "shared_delta", "shared_rho"))
     experiment_loop = jax.jit(experiment_loop, static_argnums=(2, 3, 4, 5))
 
     csmc_kernel, csmc_init, *_ = get_csmc_kernel(
@@ -278,7 +281,7 @@ def one_experiment(key):
 means_all = np.empty((args.K, args.M, args.steps - 1, args.mesh_num, args.D))
 std_devs_all = np.empty((args.K, args.M, args.steps - 1, args.mesh_num, args.D))
 final_pct_all = np.empty((args.K, args.M, args.steps))
-traces_all = np.empty((args.K, args.n_samples, args.M, 3, 1))
+traces_all = np.empty((args.K, args.n_samples, args.M, 3))
 init_us_all = np.empty((args.K, args.steps, args.mesh_num + 1, args.D))
 init_es_all = np.empty((args.K, args.steps, args.D))
 ess_all = np.empty((args.K, args.n_samples, args.M, args.steps))
