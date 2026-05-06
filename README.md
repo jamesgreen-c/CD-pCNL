@@ -49,31 +49,30 @@ Z^{(m)}_{1:T}
 \widetilde Z^{(m)}_{1:T},
 $$
 
-The reconstructed paths are written
+The reconstructed paths are written as
 
-$$
+```math
 V^{(m)}_{1:T}
 =
-H(Z^{(m)}_{1:T}),
+H\!\left(Z^{(m)}_{1:T}\right),
 \qquad
 \widetilde V^{(m)}_{1:T}
 =
-H(\widetilde Z^{(m)}_{1:T}),
-$$
+H\!\left(\widetilde Z^{(m)}_{1:T}\right),
+```
+and the ESJD estimator is
 
-and the estimator is
-
-$$
-\widehat{\operatorname{ESJD}}
+```math
+\widehat{\mathrm{ESJD}}
 =
 \frac{1}{M}
-\sum_{m=1}^M
+\sum_{m=1}^{M}
 \left\|
 \widetilde V^{(m)}_{1:T}
 -
 V^{(m)}_{1:T}
 \right\|^2.
-$$
+```
 
 #### ESJD vs dimension
 
