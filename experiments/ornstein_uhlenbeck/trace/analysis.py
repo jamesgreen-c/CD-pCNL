@@ -100,21 +100,22 @@ def plot_mean_paths(data, dirpath, dim=0):
     true_paths = to_path(true_us[:, 1:], true_es[:, :-1], true_es[:, 1:], Ts[1:])
 
     # sampled paths
-    mean_paths = data["means"][args.i]  # (K, T, M, D)
-    std_devs = data["std_devs"][args.i] # (K, T, M, D)
-    K, T, M, D = mean_paths.shape
+    mean_paths = data["means"][args.i][..., dim]  # (K, T, M)
+    std_devs = data["std_devs"][args.i][..., dim] # (K, T, M)
+    K, T, M = mean_paths.shape
 
     # flatten each chain's path
     t_fine = np.concatenate([t + np.arange(1, M + 1) / M for t in range(T)])
     mean_path_vals = mean_paths.reshape(K, -1)
     std_devs = std_devs.reshape(K, -1)
-    true_path_vals = true_paths.reshape(1, -1)
+    true_path_vals = true_paths[..., dim].reshape(1, -1)
 
     # layout
-    fig, axes = plt.subplots(K, 1, figsize=(15, 3.5 * K), squeeze=True)
+    M = min(K, 10)
+    fig, axes = plt.subplots(M, 1, figsize=(15, 3.5 * M), squeeze=True)
     t_obs = np.arange(T)
 
-    for k in range(K):
+    for k in range(M):
         ax = axes[k]
         mean_k = mean_path_vals[k]
         std_k = std_devs[k]
@@ -178,10 +179,11 @@ def plot_traces(data, dirpath):
     times = ["0", "steps/2", "steps"]
     true_vals = [true_paths[0, 0, 0, 0], true_paths[0, args.steps // 2, 0, 0], true_paths[0, args.steps - 2, 0, 0]]
 
-    fig, ax = plt.subplots(K, 3, figsize=(25, 5*K))
-    for k in range(K):
+    M = (min(K, 10))
+    fig, ax = plt.subplots(M, 3, figsize=(25, 5*M))
+    for k in range(M):
         for i in range(3):
-            _trace = traces[:, k, i, 0]
+            _trace = traces[:, k, i]
             _truth = true_vals[i]
             ax[k, i].plot(_trace[::10], label="Thinned trace")
             ax[k, i].axhline(y=_truth, color="red", linestyle="--", linewidth=1.5, label="True value",)
@@ -219,8 +221,9 @@ def plot_ess(data, dirpath):
     ess = data["ess"][args.i]  # (N, K, steps)
     N, K, steps = ess.shape
 
-    fig, ax = plt.subplots(K, 2, figsize=(15, 5*K))
-    for k in range(K):
+    M = min(K, 10)
+    fig, ax = plt.subplots(M, 2, figsize=(15, 5*M))
+    for k in range(M):
         _ess_thinned = ess[::10, k, :]
         ax[k, 0].plot(_ess_thinned, alpha=0.1, color="blue")
         ax[k, 0].set_title("Various ESS series from samples")
