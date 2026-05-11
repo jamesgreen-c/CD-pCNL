@@ -24,6 +24,7 @@ def delta_rho_adaptation_routine(
         rho_rate=0.01,
         shared_delta: bool = False, 
         shared_rho: bool = False,
+        rho_direction: int = -1,
         **_kwargs
 ):
     """
@@ -92,7 +93,7 @@ def delta_rho_adaptation_routine(
         _i, _rhos, _bs, _next_bs, _acc_hist,
         min_rho, max_rho, window_size, target_acceptance, rho_min_rate, rho_rate,
         shared=shared_rho,
-        direction=-1
+        direction=rho_direction
     )
 
     def body(carry, inp):
@@ -143,6 +144,147 @@ def delta_rho_adaptation_routine(
     inps = jnp.arange(n_steps), jax.random.split(key_d, n_steps), jax.random.split(key_r, n_steps)
     (fin_state, fin_deltas, fin_rhos, *_), hist = jax.lax.scan(body, init, inps)
     return fin_state, fin_deltas, fin_rhos, hist
+
+
+def delta_ell_adaptation_routine(
+        key,
+        init_xs,
+        init_bs,
+        kernel,
+        target_acceptance,
+        initial_deltas,
+        initial_ells,
+        n_steps,
+        min_delta=1e-12,
+        max_delta=1e2,
+        min_ell=1e-12,
+        max_ell=1e2,
+        delta_min_rate=1e-2,
+        ell_min_rate=1e-3,
+        window_size=100,
+        delta_rate=0.1,
+        ell_rate=0.05,
+        shared_delta: bool = False,
+        shared_ell: bool = False,
+        **_kwargs
+):
+    """
+    Adapts two random-walk tuning parameters, deltas and ells, for a particle
+    MCMC kernel targeting a desired acceptance rate for each.
+
+    Acceptance is estimated using ancestry-label changes:
+        accepted_t = next_bs[t] != bs[t].
+
+    The two parameters are adapted sequentially within each iteration:
+    1. Run the kernel with current (deltas, ells), then adapt deltas.
+    2. Run the kernel again from the updated state, then adapt ells.
+
+    Both deltas and ells are random-walk scale parameters. Therefore both use
+    direction=+1:
+        acceptance > target  => increase scale
+        acceptance < target  => decrease scale
+
+    Parameters
+    ----------
+    key:                    PRNGKey.
+    init_xs:                Initial latent state, expected as a pytree whose first component has leading time dimension T.
+    init_bs:                Initial ancestry labels, shape (T,).
+    kernel:                 MCMC kernel with signature: kernel(key, state, deltas, ells) -> (next_xs, next_bs, ...), where state = (xs, bs).
+    target_acceptance:      Desired acceptance rate.
+    initial_deltas:         Initial delta value(s). Broadcast to shape (T,) unless shared_delta=True.
+    initial_ells:           Initial ell value(s). Broadcast to shape (T,) unless shared_ell=True.
+    n_steps:                Number of adaptation iterations.
+    min_delta:              Lower clipping bound for deltas.
+    max_delta:              Upper clipping bound for deltas.
+    min_ell:                Lower clipping bound for ells.
+    max_ell:                Upper clipping bound for ells.
+    delta_min_rate:         Floor for the diminishing Robbins-Monro step size used to adapt deltas.
+    ell_min_rate:           Floor for the diminishing Robbins-Monro step size used to adapt ells.
+    window_size:            Rolling acceptance-window size.
+    delta_rate:             Initial Robbins-Monro rate constant for deltas.
+    ell_rate:               Initial Robbins-Monro rate constant for ells.
+    shared_delta:           If True, adapt a single shared delta by pooling acceptance across all time steps.
+    shared_ell:             If True, adapt a single shared ell by pooling acceptance across all time steps.
+    **_kwargs:              Absorbs unused keyword arguments for compatibility.
+
+    Returns
+    -------
+    fin_state:              Final state (xs, bs).
+    fin_deltas:             Final adapted deltas.
+    fin_ells:               Final adapted ells.
+    hist:                   Tuple of adaptation histories: (deltas_hist, ells_hist, delta_acceptance_hist, ell_acceptance_hist).
+    """
+
+    init_us, _ = init_xs
+    T = init_us.shape[0]
+
+    T_delta = 1 if shared_delta else T
+    T_ell = 1 if shared_ell else T
+
+    adapt_delta = lambda _i, _deltas, _bs, _next_bs, _acc_hist: adapt(
+        _i, _deltas, _bs, _next_bs, _acc_hist,
+        min_delta, max_delta, window_size, target_acceptance, delta_min_rate, delta_rate, 
+        shared=shared_delta,
+        direction=+1,
+    )
+
+    adapt_ell = lambda _i, _ells, _bs, _next_bs, _acc_hist: adapt(
+        _i, _ells, _bs, _next_bs, _acc_hist, 
+        min_ell, max_ell, window_size, target_acceptance, ell_min_rate, ell_rate,
+        shared=shared_ell,
+        direction=+1,
+    )
+
+    def body(carry, inp):
+        state, deltas, ells, deltas_acc_hist, ells_acc_hist, *_ = carry
+        xs, bs = state
+        i, key_delta_i, key_ell_i = inp
+
+        # --- adapt delta ---
+        next_xs, next_bs, *_ = kernel(key_delta_i, state, deltas, ells)
+        deltas, deltas_acc_hist, deltas_acc_rates = adapt_delta(
+            i, deltas, bs, next_bs, deltas_acc_hist
+        )
+
+        # --- adapt ell ---
+        state = (next_xs, next_bs)
+        xs, bs = state
+
+        next_xs, next_bs, *_ = kernel(key_ell_i, state, deltas, ells)
+        ells, ells_acc_hist, ells_acc_rates = adapt_ell(
+            i, ells, bs, next_bs, ells_acc_hist
+        )
+
+        deltas_ar = jnp.mean(deltas_acc_rates)
+        ells_ar = jnp.mean(ells_acc_rates)
+
+        carry_out = (
+            (next_xs, next_bs),
+            deltas, ells,
+            deltas_acc_hist, ells_acc_hist,
+            deltas_ar, ells_ar
+        )
+
+        return carry_out, (deltas, ells, deltas_ar, ells_ar)
+
+    initial_deltas = initial_deltas * jnp.ones(T_delta)
+    initial_ells = initial_ells * jnp.ones(T_ell)
+
+    initial_acc_hist_delta = jnp.zeros((T_delta, window_size)) * jnp.nan
+    initial_acc_hist_ell = jnp.zeros((T_ell, window_size)) * jnp.nan
+
+    init = (
+        (init_xs, init_bs),
+        initial_deltas, initial_ells,
+        initial_acc_hist_delta, initial_acc_hist_ell,
+        jnp.mean(initial_acc_hist_delta), jnp.mean(initial_acc_hist_ell),
+    )
+
+    key_delta, key_ell = jax.random.split(key)
+    inps = (jnp.arange(n_steps), jax.random.split(key_delta, n_steps), jax.random.split(key_ell, n_steps))
+    (fin_state, fin_deltas, fin_ells, *_), hist = jax.lax.scan(body, init, inps)
+
+    return fin_state, fin_deltas, fin_ells, hist
 
 
 def adapt(
