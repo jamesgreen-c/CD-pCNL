@@ -38,19 +38,24 @@ def results_exist(*, kernel, style, D, steps, mesh_num, args) -> bool:
     return os.path.exists(datapath)
 
 
-DS = (1, 5, 10, 20, 30, 40, 50, )# 75, 100, )
-TS = (10,)
-STEPS = (100,)
-MESH_NUMS = (50,)
+DS = (5, )
+# DS = (1, 5, 10, 20, 30, 40, 50, )# 75, 100, )
 
+TS = (10,)
+
+STEPS = (100,)
 # STEPS = (10, 50, 100, 150, 200,)
-# MESH_NUMS = (5, 10, 25, 50, 75, 100,)
+
+MESH_NUMS = (5, 10, 20, 40, 80, 160, 320, )
+# MESH_NUMS = (50,)
 
 KERNELS = (
     KernelType.PCN,
+    KernelType.RW_CSMC,
 )
 
 STYLES = (
+    'na',
     'na',
 )
 

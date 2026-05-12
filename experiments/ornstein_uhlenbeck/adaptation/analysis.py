@@ -75,6 +75,7 @@ def plot_adaptation(data, dirpath):
 #  Group analysis functions  #
 ##############################
 DS = (1, 5, 10, 20, 30, 40, 50, 75, 100, )
+MESH_NUMS = (10, 20, 40, 80, 160, 320, )
 
 
 def plot_adaptation_with_d(dirpath, t: int = 10, steps: int = 100, mesh: int = 50):
@@ -131,6 +132,59 @@ def plot_adaptation_with_d(dirpath, t: int = 10, steps: int = 100, mesh: int = 5
     plt.close()
 
 
+def plot_adaptation_with_mesh(dirpath, t: int = 10, steps: int = 100, d: int = 5):
+
+    rhos = []
+    deltas = []
+    
+    for j, mesh_num in enumerate(MESH_NUMS):
+        data, _ = load_data(d, mesh_num, steps)
+        
+        if data is None:
+            rhos.append(np.nan)
+            deltas.append(np.nan)
+
+        else:
+            rho_hist = data["rho_hist"]  # (K, iters, 1))
+            delta_hist = data["delta_hist"]
+            fin_rho = rho_hist[:, -1, 0][0]
+            fin_delta = delta_hist[:, -1, 0][0]
+            rhos.append(fin_rho)
+            deltas.append(fin_delta)
+
+    fig, ax = plt.subplots(2, 2, figsize=(30, 10))
+    
+    print(rhos[-1])
+    print(deltas[-1])
+    ref1 = np.log(np.array(MESH_NUMS))
+    rhos = np.asarray(rhos)
+
+    ax[0, 0].plot(ref1, np.log(rhos), label="Log rho", color="black")
+    ax[0, 0].plot(ref1, - ref1, label="- log mesh", linestyle="--")
+    ax[0, 0].set_ylabel("Final log rho after adaptation")
+    ax[0, 0].set_xlabel("Log Mesh")
+    ax[0, 0].legend()
+
+    ax[0, 1].plot(MESH_NUMS, rhos)
+    ax[0, 1].set_ylabel("Rho after adaptation")
+    ax[0, 1].set_xlabel("Mesh Num")
+
+    ax[1, 0].plot(ref1, np.log(deltas), label="Log delta", color="black")
+    ax[1, 0].plot(ref1, - ref1, label="- log mesh", linestyle="--")
+    ax[1, 0].set_ylabel("Final log delta after adaptation")
+    ax[1, 0].set_xlabel("Log Mesh")
+    ax[1, 0].legend()
+
+    ax[1, 1].plot(MESH_NUMS, deltas)
+    ax[1, 1].set_ylabel("Delta after adaptation")
+    ax[1, 1].set_xlabel("Mesh Num")
+
+    plt.tight_layout()
+    fig.savefig(f"{dirpath}/adaptation_vs_mesh.png", dpi=200, bbox_inches="tight")
+    plt.close()
+
+
+
 def load_data(D: int, mesh_num: int, steps: int):
     """ Load data for a given number of particles N"""
     experiment_name = "kernel={},style={},adaptation={},target={},D={},N={},mesh-num={},steps={},seed={}"
@@ -161,4 +215,5 @@ if not args.grouped:
 
 else:
     dirpath = "results"
-    plot_adaptation_with_d(dirpath)
+    # plot_adaptation_with_d(dirpath)
+    plot_adaptation_with_mesh(dirpath)

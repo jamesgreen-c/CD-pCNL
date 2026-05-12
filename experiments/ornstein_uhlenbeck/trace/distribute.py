@@ -51,11 +51,13 @@ MESH_NUMS = (10, )
 
 KERNELS = (
     KernelType.CSMC,
-    KernelType.PCN
+    KernelType.PCN,
+    KernelType.RW_CSMC,
 )
 
 STYLES = (
     'guided',
+    'na',
     'na',
 )
 

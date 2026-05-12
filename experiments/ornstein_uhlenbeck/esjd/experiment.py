@@ -87,15 +87,29 @@ NOW = time.time()
 KEY = jax.random.PRNGKey(args.seed)
 EXPERIMENT_KEYS = jax.random.split(KEY, args.K)
 
-rho_m1 = 1 - args.rho
-if args.rho_arg == "D":
-    RHO = 1 - (rho_m1 / args.D ** args.rho_scale)
-elif args.rho_arg == "T":
-    RHO = 1 - (rho_m1 / args.T ** args.rho_scale)
-elif args.rho_arg == "DT" or args.rho_arg == "TD":
-    RHO = 1 - (rho_m1 / (args.D * args.T) ** args.rho_scale)
+kernel_type = KernelType(args.kernel)
+
+if kernel_type.name == "RW_CSMC":
+    if args.rho_arg == "D":
+        RHO = args.delta / args.D ** args.rho_scale
+    elif args.rho_arg == "T":
+        RHO = args.delta / args.T ** args.rho_scale
+    elif args.rho_arg == "DT" or args.rho_arg == "TD":
+        RHO = args.delta/ (args.D * args.T) ** args.rho_scale
+    elif args.rho_arg == "DM" or args.rho_arg == "MD":
+        RHO = args.delta/ (args.D * args.mesh_num) ** args.rho_scale
+    else:
+        RHO = args.rho
 else:
-    RHO = args.rho
+    rho_m1 = 1 - args.rho
+    if args.rho_arg == "D":
+        RHO = 1 - (rho_m1 / args.D ** args.rho_scale)
+    elif args.rho_arg == "T":
+        RHO = 1 - (rho_m1 / args.T ** args.rho_scale)
+    elif args.rho_arg == "DT" or args.rho_arg == "TD":
+        RHO = 1 - (rho_m1 / (args.D * args.T) ** args.rho_scale)
+    else:
+        RHO = args.rho
 
 if args.delta_arg == "D":
     DELTA = args.delta / args.D ** args.delta_scale
@@ -105,6 +119,7 @@ elif args.delta_arg == "DT" or args.delta_arg == "TD":
     DELTA = args.delta / (args.D * args.T) ** args.delta_scale
 else:
     DELTA = args.delta
+DELTA = kernel_type.shape_delta(DELTA, args.steps)
 
 
 if args.resampling == "killing":
@@ -121,8 +136,6 @@ elif args.last_step == "barker":
 else:
     raise ValueError(f"Unknown last step {args.last_step}")
 
-kernel_type = KernelType(args.kernel)
-DELTA = kernel_type.shape_delta(DELTA, args.steps)
 
 SIGMA = 10 ** (args.log_var / 2)
 PHI = args.phi

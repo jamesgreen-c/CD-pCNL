@@ -109,16 +109,11 @@ NOW = time.time()
 KEY = jax.random.PRNGKey(args.seed)
 EXPERIMENT_KEYS = jax.random.split(KEY, args.K)
 
-rho_m1 = 1 - args.rho
-if args.rho_arg == "D":
-    RHO = 1 - (rho_m1 / args.D ** args.rho_scale)
-elif args.rho_arg == "T":
-    RHO = 1 - (rho_m1 / args.T ** args.rho_scale)
-elif args.rho_arg == "DT" or args.rho_arg == "TD":
-    RHO = 1 - (rho_m1 / (args.D * args.T) ** args.rho_scale)
-else:
-    RHO = args.rho
+kernel_type = KernelType(args.kernel)
+SHARED_DELTA = kernel_type.shared_delta()
+SHARED_RHO = kernel_type.shared_rho()
 
+# DELTA AND RHO CONFIG
 if args.delta_arg == "D":
     DELTA = args.delta / args.D ** args.delta_scale
 elif args.delta_arg == "T":
@@ -127,6 +122,38 @@ elif args.delta_arg == "DT" or args.delta_arg == "TD":
     DELTA = args.delta / (args.D * args.T) ** args.delta_scale
 else:
     DELTA = args.delta
+
+if kernel_type.name == "RW_CSMC":
+    # overwrite rho config
+    RHO = DELTA / args.mesh_num
+    MIN_RHO = MIN_DELTA / args.mesh_num
+    MAX_RHO = MAX_DELTA
+    RHO_MIN_RATE = DELTA_MIN_RATE
+    RHO_ADAPTATION_RATE = DELTA_ADAPTATION_RATE
+    RHO_DIRECTION = +1
+
+else:
+    RHO_DIRECTION = -1
+    rho_m1 = 1 - args.rho
+    if args.rho_arg == "D":
+        RHO = 1 - (rho_m1 / args.D ** args.rho_scale)
+    elif args.rho_arg == "T":
+        RHO = 1 - (rho_m1 / args.T ** args.rho_scale)
+    elif args.rho_arg == "DT" or args.rho_arg == "TD":
+        RHO = 1 - (rho_m1 / (args.D * args.T) ** args.rho_scale)
+    else:
+        RHO = args.rho
+
+print(f"""
+ADAPTATION CONFIG:        
+    - delta init:                {DELTA}
+    - min/max delta:             {MIN_DELTA}/{MAX_DELTA}
+    - delta adaptation rate:     {DELTA_ADAPTATION_RATE}
+    - rho init:                  {RHO}
+    - min/max rho:               {MIN_RHO}/{MAX_RHO}
+    - rho adaptation rate:       {RHO_ADAPTATION_RATE}
+    - rho adaptation direction:  {RHO_DIRECTION}
+""")
 
 
 if args.resampling == "killing":
@@ -143,10 +170,6 @@ elif args.last_step == "barker":
 else:
     raise ValueError(f"Unknown last step {args.last_step}")
 
-
-kernel_type = KernelType(args.kernel)
-SHARED_DELTA = kernel_type.shared_delta()
-SHARED_RHO = kernel_type.shared_rho()
 
 # --- target acceptance rate ---
 TARGET_ALPHA = args.target / 100 
@@ -199,7 +222,7 @@ def one_experiment(key):
     )
     adaptation_kernel = jax.jit(kernel)
 
-    adaptation_loop = jax.jit(adaptation_loop, static_argnums=(2, 6), static_argnames=("window_size", "target_stat", "shared_delta", "shared_rho"))
+    adaptation_loop = jax.jit(adaptation_loop, static_argnums=(2, 6), static_argnames=("window_size", "target_stat", "shared_delta", "shared_rho", "rho_direction"))
     experiment_loop = jax.jit(experiment_loop, static_argnums=(2, 3, 4, 5))
 
     csmc_kernel, csmc_init, *_ = get_csmc_kernel(
@@ -227,7 +250,8 @@ def one_experiment(key):
             delta_rate=DELTA_ADAPTATION_RATE, delta_min_rate=DELTA_MIN_RATE,
             rho_rate=RHO_ADAPTATION_RATE, rho_min_rate=RHO_MIN_RATE,
             target_stat=TARGET_STAT,
-            shared_delta=SHARED_DELTA, shared_rho=SHARED_RHO
+            shared_delta=SHARED_DELTA, shared_rho=SHARED_RHO,
+            rho_direction=RHO_DIRECTION
         )
 
     if args.verbose:

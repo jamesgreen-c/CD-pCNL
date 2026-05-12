@@ -37,10 +37,12 @@ def results_exist(*, kernel, style, D, steps, mesh_num, args) -> bool:
     return os.path.exists(datapath)
 
 
-DS = (1, 5, 10, 25, 50, 75, 100, 150, 200, )
+# DS = (1, 5, 10, 25, 50, 75, 100, 150, 200, ) # 500, )
+DS = (5, )
 TS = (10,)
 STEPS = (100, )
-MESH_NUMS = (10, )
+MESH_NUMS = (10, 20, 40, 80, 160, 320, )
+# MESH_NUMS = (10, )
 
 # STEPS = (10, 50, 100, 150, 200,)
 # MESH_NUMS = (5, 10, 25, 50, 100, 200, )
@@ -48,15 +50,28 @@ MESH_NUMS = (10, )
 
 KERNELS = (
     KernelType.CSMC,
-    KernelType.PCN
+    KernelType.PCN,
+    KernelType.RW_CSMC
 )
 
 STYLES = (
     'guided',
     'na',
+    'na'
 )
 
-combination = list(product(DS, TS, STEPS, MESH_NUMS, zip(KERNELS, STYLES)))
+RHO_SCALING = (
+    1,
+    1/5,
+    1,
+)
+RHO_ARG = (
+    'D',
+    'D',
+    'DM',
+)
+
+combination = list(product(DS, TS, STEPS, MESH_NUMS, zip(KERNELS, STYLES, RHO_SCALING, RHO_ARG)))
 print(f"Number of experiments: {len(combination)}")
 
 if args.i != -1 and not (0 <= args.i < len(combination)):
@@ -65,13 +80,13 @@ if args.i != -1 and not (0 <= args.i < len(combination)):
 indices = range(len(combination)) if args.i == -1 else [args.i]
 
 for j in indices:
-    D, T, steps, mesh, (kernel, style, *_) = combination[j]
+    D, T, steps, mesh, (kernel, style, rho_scale, rho_arg) = combination[j]
 
     if results_exist(kernel=kernel, style=style, D=D, steps=steps, mesh_num=mesh, args=args):
         print(ctext(f"Skipping (already run): kernel={kernel.name}, style={style}, T={T}, D={D}, steps={steps}, mesh-num={mesh}, N={args.N}, M={args.M}", "yellow"))
         continue
 
-    exec_str = "python3 experiment.py --kernel {} --style {} --D {} --T {} --steps {} --mesh-num {} --N {} --M {}"
-    exec_str = exec_str.format(kernel.value, style, D, T, steps, mesh, args.N, args.M)
+    exec_str = "python3 experiment.py --kernel {} --style {} --D {} --T {} --steps {} --mesh-num {} --N {} --M {} --rho-scale {} --rho-arg {}"
+    exec_str = exec_str.format(kernel.value, style, D, T, steps, mesh, args.N, args.M, rho_scale, rho_arg)
     print("\nExecuting:", ctext(exec_str, "green"))
-    # os.system(exec_str)
+    os.system(exec_str)

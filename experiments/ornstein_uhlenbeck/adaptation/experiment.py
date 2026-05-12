@@ -112,12 +112,38 @@ kernel_type = KernelType(args.kernel)
 SHARED_DELTA = kernel_type.shared_delta()
 SHARED_RHO = kernel_type.shared_rho()
 
+if kernel_type.name == "RW_CSMC":
+    # overwrite rho config
+    RHO = args.delta_init / args.mesh_num
+    MIN_RHO = MIN_DELTA / args.mesh_num
+    MAX_RHO = MAX_DELTA
+    RHO_MIN_RATE = DELTA_MIN_RATE
+    RHO_ADAPTATION_RATE = DELTA_ADAPTATION_RATE
+    RHO_DIRECTION = +1
+
+else:
+    RHO_DIRECTION = -1
+    RHO = args.rho_init
+
 # --- target acceptance rate ---
 TARGET_ALPHA = args.target / 100 
 if args.target_stat.isnumeric():
     TARGET_STAT = float(args.target_stat) / 100
 else:
     TARGET_STAT = args.target_stat
+
+print(f"""
+ADAPTATION CONFIG:        
+    - Target                     {TARGET_ALPHA}
+    - delta init:                {args.delta_init}
+    - min/max delta:             {MIN_DELTA}/{MAX_DELTA}
+    - delta adaptation rate:     {DELTA_ADAPTATION_RATE}
+    - rho init:                  {RHO}
+    - min/max rho:               {MIN_RHO}/{MAX_RHO}
+    - rho adaptation rate:       {RHO_ADAPTATION_RATE}
+    - rho adaptation direction:  {RHO_DIRECTION}
+""")
+
 
 # --- dynamics config ---
 SIGMA = 10 ** (args.log_var / 2)
@@ -158,11 +184,11 @@ def one_experiment(key):
     init_state = init(init_xs)
     
     # --- adapt delta and rho
-    adaptation_loop = jax.jit(adaptation_loop, static_argnums=(2, 6, 7), static_argnames=("window_size", "target_stat", "shared_delta", "shared_rho"))
+    adaptation_loop = jax.jit(adaptation_loop, static_argnums=(2, 6), static_argnames=("window_size", "target_stat", "shared_delta", "shared_rho", "rho_direction"))
     adaptation_state, adapted_delta, adapted_rho, adaptation_hist, *_ = adaptation_loop(
         adaptation_key, init_state, adaptation_kernel,
         TARGET_ALPHA,
-        args.delta_init, args.rho_init, 
+        args.delta_init, RHO, 
         args.adaptation,
         min_delta=MIN_DELTA, max_delta=MAX_DELTA,
         min_rho=MIN_RHO, max_rho=MAX_RHO,
@@ -170,7 +196,8 @@ def one_experiment(key):
         delta_rate=DELTA_ADAPTATION_RATE, delta_min_rate=DELTA_MIN_RATE,
         rho_rate=RHO_ADAPTATION_RATE, rho_min_rate=RHO_MIN_RATE,
         target_stat=TARGET_STAT,
-        shared_delta=SHARED_DELTA, shared_rho=SHARED_RHO
+        shared_delta=SHARED_DELTA, shared_rho=SHARED_RHO,
+        rho_direction=RHO_DIRECTION
     )
 
     deltas_hist, rhos_hist, deltas_ar_hist, rhos_ar_hist = adaptation_hist

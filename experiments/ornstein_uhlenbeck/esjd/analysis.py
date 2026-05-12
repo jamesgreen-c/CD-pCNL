@@ -218,15 +218,19 @@ def plot_esjd(data, dirpath):
 DS = (1, 5, 10, 25, 50, 75, 100, 150, 200, )
 TS = (10,)
 STEPS = (100, )
-MESH_NUMS = (10, )
+# MESH_NUMS = (10, )
+MESH_NUMS = (10, 20, 40, 80, 160, 320, )
+
 
 KERNELS = (
     KernelType.CSMC,
-    KernelType.PCN
+    KernelType.PCN,
+    KernelType.RW_CSMC,
 )
 
 STYLES = (
     'guided',
+    'na',
     'na',
 )
 
@@ -287,6 +291,7 @@ def _plot_esjd_against(
                 D_j,
                 mesh_num_j,
                 steps_j,
+                True
             )
 
             xs.append(value)
@@ -330,13 +335,13 @@ def plot_esjd_against_d(
 #     _plot_esjd_against(dirpath, STEPS, "Steps", "esjd_vs_steps.png", D=D, T=T, mesh_num=mesh_num,)
 
 
-# def plot_esjd_against_mesh_num(
-#         dirpath,
-#         D: int = 10,
-#         T: int = 10,
-#         steps: int = 100,
-#     ):
-#     _plot_esjd_against(dirpath, MESH_NUMS, "Mesh number", "esjd_vs_mesh_num.png", D=D, T=T, steps=steps,)
+def plot_esjd_against_mesh_num(
+        dirpath,
+        D: int = 5,
+        T: int = 10,
+        steps: int = 100,
+    ):
+    _plot_esjd_against(dirpath, MESH_NUMS, "Mesh number", "esjd_vs_mesh_num.png", D=D, T=T, steps=steps,)
 
 
 
@@ -344,7 +349,7 @@ def plot_esjd_against_d(
 #  load data function  #
 ########################
 
-def load_data(kernel, style, D, mesh_num, steps):
+def load_data(kernel, style, D, mesh_num, steps, grouped):
     experiment_name = "kernel={},style={},D={},N={},mesh-num={},steps={},M={},seed={}"
     experiment_name = experiment_name.format(
         kernel.name,
@@ -360,13 +365,14 @@ def load_data(kernel, style, D, mesh_num, steps):
     if not os.path.exists(dirpath):
         print(ctext("No such experiment exists", "yellow"))
         print(experiment_name)
-        return None, None 
-        # exit()
+        if grouped:
+            return None, None 
+        else:
+            exit()
 
     data = np.load(f"{dirpath}/data.npz")
     return data, dirpath
     
-
 
 if not args.grouped:
     data, dirpath = load_data(
@@ -374,7 +380,8 @@ if not args.grouped:
         args.style,
         args.D,
         args.mesh_num,
-        args.steps
+        args.steps,
+        False
     )
     plot_particles(data, dirpath)
     plot_paths(data, dirpath)
@@ -383,9 +390,9 @@ if not args.grouped:
 else: 
 
     dirpath="results"
-    plot_esjd_against_d(dirpath)
+    # plot_esjd_against_d(dirpath)
+    plot_esjd_against_mesh_num(dirpath)
     # plot_esjd_against_steps(dirpath)
-    # plot_esjd_against_mesh_num(dirpath)
 
 
 

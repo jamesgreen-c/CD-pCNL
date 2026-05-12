@@ -25,7 +25,7 @@ parser.add_argument("--T", dest="T", type=int, default=10)
 parser.add_argument("--D", dest="D", type=int, default=1)
 parser.add_argument("--M", dest="M", type=int, default=5)
 parser.add_argument("--N", dest="N", type=int, default=31)  # total number of particles is N + 1
-parser.add_argument("--mesh-num", type=int, dest="mesh_num", default=50)
+parser.add_argument("--mesh-num", type=int, dest="mesh_num", default=10)
 parser.add_argument("--steps", type=int, default=100)
 parser.add_argument("--seed", dest="seed", type=int, default=1234)
 
@@ -111,7 +111,7 @@ def plot_mean_paths(data, dirpath, dim=0):
     true_path_vals = true_paths[..., dim].reshape(1, -1)
 
     # layout
-    M = min(K, 10)
+    M = min(K, 3)
     fig, axes = plt.subplots(M, 1, figsize=(15, 3.5 * M), squeeze=True)
     t_obs = np.arange(T)
 
@@ -136,8 +136,23 @@ def plot_mean_paths(data, dirpath, dim=0):
 
     # single legend
     handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="upper center", ncol=4)
-    fig.tight_layout(rect=[0, 0, 1, 0.94])
+
+    fig.suptitle(
+        f"kernel={kernel_type.name}, style={args.style}, D={args.D}",
+        y=0.985,
+        fontsize=14,
+    )
+
+    fig.legend(
+        handles,
+        labels,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 0.945),
+        ncol=4,
+        frameon=False,
+    )
+
+    fig.tight_layout(rect=[0, 0, 1, 0.88])
 
     outpath = os.path.join(dirpath, "paths.png")
     fig.savefig(outpath, dpi=200, bbox_inches="tight")
@@ -265,8 +280,8 @@ def load_data(kernel, style, D, mesh_num, steps):
     if not os.path.exists(dirpath):
         print(ctext("No such experiment exists", "yellow"))
         print(experiment_name)
-        return None, None 
-        # exit()
+        # return None, None 
+        exit()
 
     data = np.load(f"{dirpath}/data.npz")
     return data, dirpath
