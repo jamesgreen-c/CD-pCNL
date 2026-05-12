@@ -364,8 +364,10 @@ def get_rw_csmc_kernel(ys, drift: Callable, diffusion: Callable, sigma, obs_sigm
         _, e_t_m_1 = z_t_m_1
         u_t, e_t = z_t
         x_t = bridge.to_path(diffusion, u_t, e_t_m_1, e_t, t, dt)
-        return log_potential(x_t, e_t_m_1, y_t, drift, diffusion, t, dt, obs_sigma)
-    
+        val = log_potential(x_t, e_t_m_1, y_t, drift, diffusion, t, dt, obs_sigma)
+        val += br.logpdf(u_t, jnp.zeros_like(u_t), 1.0, dt)
+        return val
+
     Gamma_0_plus_params = Gamma_0, (ys[0], ts[0], dts[0])
     Gamma_t_plus_params = Gamma_t, (ys[1:], ts[1:], dts[1:])
     kernel = lambda key, state, delta, rho: rw_csmc.kernel(key, state[0], state[1], Gamma_0_plus_params, Gamma_t_plus_params, 
