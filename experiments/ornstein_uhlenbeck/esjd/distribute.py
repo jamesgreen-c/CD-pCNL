@@ -13,6 +13,7 @@ parser.add_argument("--i", dest="i", type=int, default=-1)
 parser.add_argument("--seed", dest="seed", type=int, default=1234)
 parser.add_argument("--N", dest="N", type=int, default=31)  # total number of particles is N + 1
 parser.add_argument("--M", dest="M", type=int, default=100)
+parser.add_argument("--K", dest="K", type=int, default=1)  # number of experiments
 parser.add_argument("--rho", dest="rho", type=float, default=.25)
 
 args = parser.parse_args()
@@ -86,7 +87,7 @@ for j in indices:
         print(ctext(f"Skipping (already run): kernel={kernel.name}, style={style}, T={T}, D={D}, steps={steps}, mesh-num={mesh}, N={args.N}, M={args.M}", "yellow"))
         continue
 
-    exec_str = "python3 experiment.py --kernel {} --style {} --D {} --T {} --steps {} --mesh-num {} --N {} --M {} --rho-scale {} --rho-arg {}"
-    exec_str = exec_str.format(kernel.value, style, D, T, steps, mesh, args.N, args.M, rho_scale, rho_arg)
+    exec_str = "python3 experiment.py --kernel {} --style {} --D {} --T {} --steps {} --mesh-num {} --N {} --M {} --K {} --rho-scale {} --rho-arg {}"
+    exec_str = exec_str.format(kernel.value, style, D, T, steps, mesh, args.N, args.M, args.K, rho_scale, rho_arg)
     print("\nExecuting:", ctext(exec_str, "green"))
     os.system(exec_str)
