@@ -54,8 +54,10 @@ kernel_type = KernelType(args.kernel)
 SIGMA = 10 ** (args.log_var / 2)
 PHI = args.phi
 DRIFT, DIFFUSION = get_dynamics(PHI, SIGMA)
-DT = args.T / args.steps
-Ts = np.arange(args.steps) * DT
+# Ts = np.arange(args.steps) * DT
+Ts = jnp.linspace(0.0, args.T, args.steps)
+DT = jnp.diff(Ts)[0]
+# DTs = jnp.concatenate([jnp.array([0.0]), jnp.diff(Ts)])
 
 # --- functions ---
 def plot_particles(data, dirpath, dim=0):
@@ -192,7 +194,8 @@ def plot_esjd(data, dirpath):
     
     """
     esjd = data["esjd"]  # (K, steps - 1)
-    mean_esjd = esjd.sum(axis=1).mean()
+    mean_esjd = esjd.mean()
+    # mean_esjd = esjd.sum(axis=1).mean()
 
     print("Mean ESJD: ", mean_esjd)
 
@@ -202,7 +205,7 @@ def plot_esjd(data, dirpath):
     ax.plot(Ts[1:], esjd)
     ax.set_xlabel("t")
     ax.set_ylabel("ESJD")
-    ax.set_title("ESJD for driving Brownian motions (u's)")
+    ax.set_title("ESJD for driving reconstructed path")
 
     plt.tight_layout()
     fig.savefig(f"{dirpath}/esjd.png", dpi=200, bbox_inches="tight")
@@ -244,7 +247,8 @@ def _mean_esjd(data):
     esjd has shape (K, steps - 1).
     """
     esjd = data["esjd"]  # (K, steps)
-    return esjd.sum(axis=1).mean()
+    return esjd.mean()
+    # return esjd.sum(axis=1).mean()
 
 
 def _plot_esjd_against(
@@ -390,8 +394,8 @@ if not args.grouped:
 else: 
 
     dirpath="results"
-    # plot_esjd_against_d(dirpath)
-    plot_esjd_against_mesh_num(dirpath)
+    plot_esjd_against_d(dirpath)
+    # plot_esjd_against_mesh_num(dirpath)
     # plot_esjd_against_steps(dirpath)
 
 

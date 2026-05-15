@@ -139,9 +139,11 @@ else:
 
 SIGMA = 10 ** (args.log_var / 2)
 PHI = args.phi
-DTs = jnp.repeat(args.T / args.steps, args.steps)
+# DTs = jnp.repeat(args.T / args.steps, args.steps)
 # DTs = jnp.repeat(args.T / args.T, args.T)  # make dt = 1 so we can easily use kalman filter
-Ts = jnp.cumsum(DTs)
+# Ts = jnp.cumsum(DTs)
+Ts = jnp.linspace(0.0, args.T, args.steps)
+DTs = jnp.concatenate([jnp.array([0.0]), jnp.diff(Ts)])
 DRIFT, DIFFUSION = get_dynamics(PHI, SIGMA)
 OBS_SIGMA = 0.2
 
@@ -193,7 +195,9 @@ def one_experiment(key):
         next_path = to_path(next_us[1:], next_es[:-1], next_es[1:], Ts[1:], DTs[1:])  # (T - 1, M, D)
         
         # --- calculate esjd ---
-        _esjd = jnp.sum((next_path - path) ** 2, axis=(1, 2))
+        sq_jump = jnp.sum((next_path - path) ** 2, axis=(1, 2))
+        _esjd = sq_jump * (DTs[1:] / args.mesh_num)
+        _esjd = _esjd / args.D
         return _esjd, next_xs, next_path
 
     sample_keys = jax.random.split(sample_key, args.M)
