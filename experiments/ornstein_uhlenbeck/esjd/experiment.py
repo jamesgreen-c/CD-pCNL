@@ -67,6 +67,9 @@ parser.add_argument("--plot", action='store_true')
 parser.add_argument('--no-plot', dest='plot', action='store_false')
 parser.set_defaults(plot=False)
 
+parser.add_argument("--save-particles", dest="save_particles", action="store_true")
+parser.set_defaults(save_particles=False)
+
 args = parser.parse_args()
 
 print(f"""
@@ -206,15 +209,19 @@ def one_experiment(key):
     return esjd_vals.mean(0), samples, sample_paths, true_xs, ys, init_xs
 
 
-us_all = np.empty((args.K, args.M, args.steps, args.mesh_num + 1, args.D))
-es_all = np.empty((args.K, args.M, args.steps, args.D))
-true_us_all = np.empty((args.K, args.steps, args.mesh_num + 1, args.D))
-true_es_all = np.empty((args.K, args.steps, args.D))
-ys_all = np.empty((args.K, args.steps, args.D))
-init_us_all = np.empty((args.K, args.steps, args.mesh_num + 1, args.D))
-init_es_all = np.empty((args.K, args.steps, args.D))
 esjd_all = np.empty((args.K, args.steps - 1))
-paths_all = np.empty((args.K, args.M, args.steps - 1, args.mesh_num, args.D))
+
+# only store if explicitly told to
+if args.save_particles:        
+    us_all = np.empty((args.K, args.M, args.steps, args.mesh_num + 1, args.D))
+    es_all = np.empty((args.K, args.M, args.steps, args.D))
+    true_us_all = np.empty((args.K, args.steps, args.mesh_num + 1, args.D))
+    true_es_all = np.empty((args.K, args.steps, args.D))
+    ys_all = np.empty((args.K, args.steps, args.D))
+    init_us_all = np.empty((args.K, args.steps, args.mesh_num + 1, args.D))
+    init_es_all = np.empty((args.K, args.steps, args.D))
+    paths_all = np.empty((args.K, args.M, args.steps - 1, args.mesh_num, args.D))
+
 
 for k, key_k in enumerate(tqdm.tqdm(EXPERIMENT_KEYS, desc="Experiment: ")):
     esjd_k, samples_k, sample_paths_k, true_xs_k, ys_k, init_xs_k = one_experiment(key_k)
@@ -230,15 +237,16 @@ for k, key_k in enumerate(tqdm.tqdm(EXPERIMENT_KEYS, desc="Experiment: ")):
     # print(sample_paths_k.shape)
     # print(esjd_k.shape)
 
-    us_all[k] = us_k
-    es_all[k] = es_k
-    true_us_all[k] = true_us_k
-    true_es_all[k] = true_es_k
-    ys_all[k] = ys_k
-    init_us_all[k] = init_us_k
-    init_es_all[k] = init_es_k
     esjd_all[k] = esjd_k
-    paths_all[k] = sample_paths_k
+    if args.save_particles:
+        us_all[k] = us_k
+        es_all[k] = es_k
+        true_us_all[k] = true_us_k
+        true_es_all[k] = true_es_k
+        ys_all[k] = ys_k
+        init_us_all[k] = init_us_k
+        init_es_all[k] = init_es_k
+        paths_all[k] = sample_paths_k
 
 if not os.path.exists("results"):
     os.mkdir("results")
@@ -261,16 +269,22 @@ if not os.path.exists(dirpath):
 
 datapath = f"{dirpath}/data.npz"
 print(datapath)
-np.savez_compressed(
-    datapath, 
-    esjd=esjd_all,
-    paths=paths_all,
-    us=us_all,
-    es=es_all,
-    true_us=true_us_all,
-    true_es=true_es_all,
-    ys=ys_all,
-    init_us=init_us_all,
-    init_es=init_es_all
-)
 
+if args.save_particles:
+    np.savez_compressed(
+        datapath, 
+        esjd=esjd_all,
+        paths=paths_all,
+        us=us_all,
+        es=es_all,
+        true_us=true_us_all,
+        true_es=true_es_all,
+        ys=ys_all,
+        init_us=init_us_all,
+        init_es=init_es_all
+    )
+else:
+    np.savez_compressed(
+        datapath, 
+        esjd=esjd_all,
+    )
