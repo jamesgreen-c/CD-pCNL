@@ -1,7 +1,3 @@
-"""
-TODO:
-    1. Write out the pcn langevin proposal kernel
-"""
 from functools import partial
 
 from chex import Array, PRNGKey
