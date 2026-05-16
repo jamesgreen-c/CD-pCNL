@@ -17,6 +17,7 @@ from cd_ssm import euler
 from cd_ssm import brownian as br
 from cd_ssm import t_csmc
 from cd_ssm import t_cd_pcn
+from cd_ssm import t_cd_pcnl
 from cd_ssm import rw_csmc
 from cd_ssm import bridge
 from cd_ssm import adaptation as adpt
@@ -26,6 +27,7 @@ class KernelType(Enum):
     CSMC = 0
     PCN = 1
     RW_CSMC = 2
+    PCNL = 3
 
     @property
     def kernel_maker(self):
@@ -33,6 +35,8 @@ class KernelType(Enum):
             return get_csmc_kernel
         elif self == KernelType.PCN:
             return get_pcn_csmc_kernel
+        elif self == KernelType.PCNL:
+            return get_pcn_langevin_csmc_kernel
         elif self == KernelType.RW_CSMC:
             return get_rw_csmc_kernel
         else:
@@ -42,6 +46,8 @@ class KernelType(Enum):
         if self == KernelType.CSMC:
             return delta
         elif self == KernelType.PCN:
+            return delta * np.ones((T,))
+        elif self == KernelType.PCNL:
             return delta * np.ones((T,))
         elif self == KernelType.RW_CSMC:
             return delta * np.ones((T,))
@@ -53,6 +59,8 @@ class KernelType(Enum):
             return True
         elif self == KernelType.PCN:
             return True
+        elif self == KernelType.PCNL:
+            return True
         elif self == KernelType.RW_CSMC:
             return True
         else:
@@ -62,6 +70,8 @@ class KernelType(Enum):
         if self == KernelType.CSMC:
             return True
         elif self == KernelType.PCN:
+            return True
+        elif self == KernelType.PCNL:
             return True
         elif self == KernelType.RW_CSMC:
             return True
@@ -320,6 +330,69 @@ def get_pcn_csmc_kernel(ys, drift: Callable, diffusion: Callable, sigma, obs_sig
 
     return kernel, init, adaptation_routine, sampling_routine_fn
 
+
+def get_pcn_langevin_csmc_kernel(ys, drift: Callable, diffusion: Callable, sigma, obs_sigma, N, num, dts, **kwargs):
+    """
+    Kernel constructor for CD-pCNL kernel.  
+
+    Parameters
+    ----------
+    ys:         The observations at the discrete times. Shape (T, d)
+    drift:      The drift function. Should take (t, x) as args
+    diffusion:  The diffusion function. Should take (t, x) as args
+    sigma:      The standard deviation of the initial Gaussian prior
+    N:          The number of particles, excluding the retained reference path
+    num:        The number of mesh steps used within each observation interval
+    dts:        The time increments between observations. Shape (T,)
+    style:      The proposal style to use. Currently only "guided" is implemented
+    kwargs:     Additional keyword arguments passed to the underlying cSMC kernel,
+                such as resampling and ancestor move functions
+
+    Returns
+    ----------
+    kernel:     The CD-pCN kernel. Takes a PRNG key and a state (reference path, reference ancestors),
+                runs the forward pass and backward pass, and returns the updated particle genealogy
+    init:       Initialiser for the CD-pCN state. Takes a reference path and returns the pair
+                (reference path, zero ancestor indices)
+    """
+    kwargs.pop("conditional")
+    kwargs.pop("style")
+
+    T, dx = ys.shape
+    ts = jnp.concatenate([jnp.array([0.0]), jnp.cumsum(dts)])[:-1]
+
+    M0_logpdf = lambda e: norm.logpdf(e, loc=0.0, scale=sigma).sum(axis=-1)
+    Mt_logpdf = lambda z_t_m_1, z_t, params: euler.logpdf(z_t_m_1[1], z_t[1], drift, diffusion, params[1], params[2])
+
+    def Gamma_0(u, e):
+        return norm.logpdf(ys[0], loc=e, scale=obs_sigma).sum(axis=-1) + M0_logpdf(e)
+
+    def Gamma_t(u_t_m_1, e_t_m_1, u_t, e_t, params):
+        y_t, t, dt = params
+        x_t = bridge.to_path(diffusion, u_t, e_t_m_1, e_t, t, dt)
+        return log_potential(x_t, e_t_m_1, y_t, drift, diffusion, t, dt, obs_sigma)
+    
+    Gamma_0_plus_params = Gamma_0, (ys[0], ts[0], dts[0])
+    Gamma_t_plus_params = Gamma_t, (ys[1:], ts[1:], dts[1:])
+    kernel = lambda key, state, delta, rho: t_cd_pcnl.kernel(key, state[0], state[1], Gamma_0_plus_params, Gamma_t_plus_params, 
+                                                            delta, rho,
+                                                            N=N,
+                                                            **kwargs)
+    init = lambda x: (x, jnp.zeros((T,), dtype=int))
+
+    def sampling_routine_fn(key, state, kernel_, n_steps, verbose, get_samples):
+        return aux_sampling_routine(key, state[0], state[1], kernel_, n_steps, verbose, get_samples)
+
+    def adaptation_routine(key, state, kernel_, target_acceptance, initial_delta, initial_rho,
+                         n_steps, **kwargs):
+        return adpt.delta_rho_adaptation_routine(key, state[0], state[1], 
+                                                kernel_, 
+                                                target_acceptance,
+                                                initial_delta, initial_rho,
+                                                n_steps,
+                                                **kwargs)
+
+    return kernel, init, adaptation_routine, sampling_routine_fn
 
 
 def get_rw_csmc_kernel(ys, drift: Callable, diffusion: Callable, sigma, obs_sigma, N, num, dts, **kwargs):
