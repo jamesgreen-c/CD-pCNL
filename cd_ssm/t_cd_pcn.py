@@ -1,12 +1,5 @@
 """
-Implements the CD-PCN kernel.
-
-
-HUGE BUG FIX REQUIRED: 
-1. G'_t = Q_t = M_tG_t = Gamma_t implemented in the kernels. This is used as the weights in the forward pass (correct)
-2. The backward pass needs Q'_t (current passing Gamma_t). Where Q'_t needs to be implemented as log G'_t + log M'_t 
-    = Gamma_t + log M'_t with log M'_t = pcn logpdf (u_t^i | phi_t^u) + norm logpdf (e_t^i | phi_t^e, ell_t / 2)
-ie just write a Gamma_tilde_t function and pass that to backward pass functions, and we're good. 
+Implements the CD-pCN kernel.
 """
 from typing import Callable, Union, Any
 

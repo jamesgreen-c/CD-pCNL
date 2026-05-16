@@ -128,7 +128,7 @@ def plot_adaptation_with_d(dirpath, t: int = 10, steps: int = 100, mesh: int = 5
     ax[1, 1].set_xlabel("D")
 
     plt.tight_layout()
-    fig.savefig(f"{dirpath}/adaptation_vs_d.png", dpi=200, bbox_inches="tight")
+    fig.savefig(f"{dirpath}/{kernel_type.name}_adaptation_vs_d.png", dpi=200, bbox_inches="tight")
     plt.close()
 
 
@@ -180,7 +180,7 @@ def plot_adaptation_with_mesh(dirpath, t: int = 10, steps: int = 100, d: int = 5
     ax[1, 1].set_xlabel("Mesh Num")
 
     plt.tight_layout()
-    fig.savefig(f"{dirpath}/adaptation_vs_mesh.png", dpi=200, bbox_inches="tight")
+    fig.savefig(f"{dirpath}/{kernel_type.name}_adaptation_vs_mesh.png", dpi=200, bbox_inches="tight")
     plt.close()
 
 

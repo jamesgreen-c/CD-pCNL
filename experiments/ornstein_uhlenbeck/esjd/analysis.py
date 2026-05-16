@@ -25,7 +25,7 @@ parser.add_argument("--T", dest="T", type=int, default=10)
 parser.add_argument("--D", dest="D", type=int, default=1)
 parser.add_argument("--M", dest="M", type=int, default=5)
 parser.add_argument("--N", dest="N", type=int, default=31)  # total number of particles is N + 1
-parser.add_argument("--mesh-num", type=int, dest="mesh_num", default=50)
+parser.add_argument("--mesh-num", type=int, dest="mesh_num", default=10)
 parser.add_argument("--steps", type=int, default=100)
 parser.add_argument("--seed", dest="seed", type=int, default=1234)
 
@@ -218,7 +218,7 @@ def plot_esjd(data, dirpath):
 ##############################
 
 # --- arguments ---
-DS = (1, 5, 10, 25, 50, 75, 100, 150, 200, )
+DS = (1, 5, 10, 25, 50, 75, 100, 150, 200, 250, 300, )
 TS = (10,)
 STEPS = (100, )
 # MESH_NUMS = (10, )
