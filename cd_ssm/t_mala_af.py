@@ -26,7 +26,7 @@ def kernel(
     backward: bool = False,
 ):
     """
-    Particle RWM kernel.
+    CD-MALA kernel.
 
     Parameters
     ----------
@@ -52,35 +52,89 @@ def kernel(
     #        HOUSEKEEPING         #
     ###############################
     u_star, e_star = x_star
-    T, M, d_x = u_star.shape
+    T, d_x = e_star.shape
 
     keys = jax.random.split(key, T + 2)
     key_e, key_u, key_backward, keys_resampling = keys[0], keys[1], keys[2], keys[3:]
     key_aux_e, key_proposals_e = jax.random.split(key_e)    
 
     keys_u = jax.random.split(key_u, 2*T)
-    keys_proposals_u, keys_aux_u = keys_u[:T], keys_u[T:]  
+    keys_proposals_u, keys_aux_u = keys_u[:T], keys_u[T:]
 
     # Unpack Gamma function
     Gamma_0, Gamma__0_params = Gamma_0 if isinstance(Gamma_0, tuple) else (Gamma_0, None)
     Gamma_t, Gamma_params = Gamma_t if isinstance(Gamma_t, tuple) else (Gamma_t, None)
 
-    ########################################
-    #         Augmented potential          #
-    ########################################
+    # grad functions. Assumes argnums go order u, e
+    Gamma_0_grad = jax.grad(Gamma_0, 1)
+    Gamma_t_grad = jax.grad(Gamma_t, (2, 3))
+
+    ###########################################
+    #       Modified weight functions         #
+    ###########################################
+
+    def Gamma_0_tilde(x_0, ell_0, aux_e_0):
+        u_0, e_0 = x_0
+
+        val_grad_Gamma = jax.value_and_grad(Gamma_0, 1)
+        vec_Gamma_val_grad = jnp.vectorize(val_grad_Gamma, signature='(m,d),(d)->(),(d)')        
+        Gamma_val, e_Gamma_grad = vec_Gamma_val_grad(u_0, e_0)
+
+        # Compute N(aux_e_t | e_t + 0.5 * delta_t * Gamma_e_grad, 0.5 * ell_t * I)
+        gradient_log_pdf = -jnp.sum((aux_e_0 - e_0 - 0.5 * ell_0 * e_Gamma_grad) ** 2, axis=-1) / ell_0
+        return Gamma_val + gradient_log_pdf
+
+    def G_0_tilde(x_0, ell_0, aux_e_0):
+        _, e_0 = x_0
+
+        # Compute N(e_t | aux_e_t, 0.5 * ell_t * I), note how 0.5 / 0.5 = 1
+        proposal_log_pdf = -jnp.sum((e_0 - aux_e_0) ** 2, axis=-1) / ell_0
+        return Gamma_0_tilde(x_0, ell_0, aux_e_0) - proposal_log_pdf
+
     def Gamma_t_tilde(x_t_m_1, x_t, params):
-        ell_t, delta_t, aux_u_t, aux_e_t, orig_params = params
+        ell_t, rho_t, aux_u_t, aux_e_t, orig_params = params
+        dt = orig_params[2]
+        u_t_m_1, e_t_m_1 = x_t_m_1
+        u_t, e_t = x_t
+
+        # evaluate gamma and its gradients wrt u and e
+        val_grad_Gamma = jax.value_and_grad(Gamma_t, (2, 3))
+        def _flat_val_grad(up, ep, u, e, _params):
+            _Gamma_val, (_u_grad, _e_grad) = val_grad_Gamma(up, ep, u, e, _params)
+            return _Gamma_val, _u_grad, _e_grad
+        
+        vec_Gamma_val_grad = jnp.vectorize(_flat_val_grad, signature='(m,d),(d),(m,d),(d)->(),(m,d),(d)', excluded=(4,))
+        Gamma_val, u_Gamma_grad, e_Gamma_grad = vec_Gamma_val_grad(u_t_m_1, e_t_m_1, u_t, e_t, orig_params)
+
+        # Compute N(aux_e_t | e_t + 0.5 * ell_t * Gamma_grad, 0.5 * ell_t * I) and P^∇_t(aux_u_t | u_t)
+        e_grad_log_pdf = -jnp.sum((aux_e_t - e_t - 0.5 * ell_t * e_Gamma_grad) ** 2, axis=-1) / ell_t
+        u_grad_log_pdf = brownian.Mala.logpdf(u_t, aux_u_t, rho_t, u_Gamma_grad, dt)
+
+        return Gamma_val + e_grad_log_pdf + u_grad_log_pdf
+
+    def G_t_tilde(x_t_m_1, x_t, params):
+        ell_t, rho_t, aux_u_t, aux_e_t, orig_params = params
         dt = orig_params[2]
         u_t, e_t = x_t
 
-        val = Gamma_t(x_t_m_1, x_t, orig_params)
-        val += brownian.logpdf(u_t, aux_u_t, 0.5 * delta_t, dt)
-        val += -jnp.sum((e_t - aux_e_t) ** 2, axis=-1) / ell_t
-        return val
+        # Compute N(e_t | aux_e_t, 0.5 * ell_t * I) and P_t(u_t | aux_u_t)
+        e_prop_log_pdf = -jnp.sum((e_t - aux_e_t) ** 2, axis=-1) / ell_t
+        u_prop_log_pdf = brownian.logpdf(u_t, aux_u_t, rho_t, dt)
+
+        return Gamma_t_tilde(x_t_m_1, x_t, params) - e_prop_log_pdf - u_prop_log_pdf
 
     ########################################
     #         Auxiliary proposals          #
     ########################################
+    
+    # Compute gradients
+    e_grad_log_w_star_0 = Gamma_0_grad(u_star[0], e_star[0])
+    u_grad_log_w_star, e_grad_log_w_star = jax.vmap(
+        Gamma_t_grad, 
+        [0, 0, 0, 0, 0]
+    )(u_star[:-1], e_star[:-1], u_star[1:], e_star[1:], Gamma_params)
+    u_grad_log_w_star = jnp.insert(u_grad_log_w_star, 0, jnp.zeros_like(u_star[0]), axis=0)
+    e_grad_log_w_star = jnp.insert(e_grad_log_w_star, 0, e_grad_log_w_star_0, axis=0)
 
     # auxiliary endpoint proposals
     ells = jnp.broadcast_to(jnp.atleast_1d(ells), (T,))
@@ -94,9 +148,10 @@ def kernel(
     dts = jnp.insert(dts, 0, dt_0, axis=0)
 
     deltas = jnp.broadcast_to(jnp.atleast_1d(deltas), (T,))
-    vmapped_brownian_proposal = jax.vmap(brownian.propose, in_axes=(0, 0, 0, 0, None))
-    aux_us = vmapped_brownian_proposal(keys_aux_u, u_star, 0.5 * deltas, dts, 1)
-    us = vmapped_brownian_proposal(keys_proposals_u, aux_us, 0.5 * deltas, dts, N + 1)
+    brownian_proposal = jax.vmap(brownian.propose, in_axes=(0, 0, 0, 0, None))
+    mala_proposal = jax.vmap(brownian.Mala.propose, in_axes=(0, 0, 0, 0, 0, None))
+    aux_us = mala_proposal(keys_aux_u, u_star, deltas, u_grad_log_w_star, dts, 1)                       # aux_u_t = rho*u_t + sqrt(1 - rho^2) * W_t()
+    us = brownian_proposal(keys_proposals_u, aux_us, deltas, dts, N + 1) 
 
     # print("aux_us shape: ", aux_us.shape)
     # print("u_star shape: ", u_star.shape)
@@ -116,24 +171,25 @@ def kernel(
     x0 = tree_map(lambda x: x[0], xs)
 
     # Compute initial weights and normalize
-    log_w0 = Gamma_0(x0)
+    log_w0 = G_0_tilde(x0, ells[0], aux_es[0])
     log_w0 -= jnp.max(log_w0)
     w0 = normalize(log_w0, log_space=False)
 
     #################################
     #        Forward pass           #
     #################################
+
     def body(carry, inp):
         w_t_m_1, x_t_m_1 = carry
-        Gamma_params_t, x_t, b_star_t_m_1, b_star_t, key_t = inp
+        Gamma_tilde_params_t, x_t, b_star_t_m_1, b_star_t, key_t = inp
 
         # Conditional resampling
         A_t = resampling_func(key_t, w_t_m_1, b_star_t_m_1, b_star_t)
         x_t_m_1 = tree_map(lambda x: jnp.take(x, A_t, axis=0), x_t_m_1)
 
-        log_w_t = Gamma_t(x_t_m_1, x_t, Gamma_params_t)
-        log_w_t = normalize(log_w_t, log_space=True)
-        w_t = jnp.exp(log_w_t)
+        log_w_t = G_t_tilde(x_t_m_1, x_t, Gamma_tilde_params_t)
+        log_w_t -= jnp.max(log_w_t)
+        w_t = normalize(log_w_t)
 
         # Return next step
         next_carry = w_t, x_t
@@ -142,33 +198,32 @@ def kernel(
         return next_carry, save
 
     # Run forward cSMC
-    inputs = (Gamma_params, tree_map(lambda x: x[1:], xs), b_star[:-1], b_star[1:], keys_resampling,)
+    Gamma_tilde_params = ells[1:], deltas[1:], aux_us[1:], aux_es[1:], Gamma_params
+    inputs = (Gamma_tilde_params, tree_map(lambda x: x[1:], xs), b_star[:-1], b_star[1:], keys_resampling,)
     _, (log_ws, As) = jax.lax.scan(body,
                                   (w0, x0),
                                   inputs,
                                 )
 
-    # Insert initial weight and particles
+    # Insert initial weight and particle
     log_ws = jnp.insert(log_ws, 0, log_w0, axis=0)
 
     #################################
     #        Backward pass          #
     #################################
-    Gamma_tilde_params = ells[1:], deltas[1:], aux_us[1:], aux_es[1:], Gamma_params
     if backward:
         xs, Bs = backward_sampling_pass(key_backward, Gamma_t_tilde, Gamma_tilde_params, b_star[-1], xs, log_ws,
                                         ancestor_move_func)
     else:
         xs, Bs = backward_scanning_pass(key_backward, As, b_star[-1], xs, log_ws[-1], ancestor_move_func)
-
-    is_any_nan = tree_reduce(
-        lambda acc, x: jnp.logical_or(acc, jnp.any(~jnp.isfinite(x))),
-        xs,
-        initializer=False,
-    )
-    xs = tree_map(lambda x_new, x_ref: jnp.where(is_any_nan, x_ref, x_new), xs, x_star)
-    Bs = jnp.where(is_any_nan, b_star, Bs)
+    
+    # is_any_nan = tree_reduce(
+    #     lambda acc, x: jnp.logical_or(acc, jnp.any(~jnp.isfinite(x))),
+    #     xs,
+    #     initializer=False,
+    # )
+    # xs = tree_map(lambda x_new, x_ref: jnp.where(is_any_nan, x_ref, x_new), xs, x_star)
+    # Bs = jnp.where(is_any_nan, b_star, Bs)
 
     return xs, Bs, log_ws
-
 
