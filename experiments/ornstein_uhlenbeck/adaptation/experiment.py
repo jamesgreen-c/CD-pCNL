@@ -112,7 +112,7 @@ kernel_type = KernelType(args.kernel)
 SHARED_DELTA = kernel_type.shared_delta()
 SHARED_RHO = kernel_type.shared_rho()
 
-if kernel_type.name == "RW_CSMC":
+if KernelType.is_random_walk:
     # overwrite rho config
     RHO = args.delta_init / args.mesh_num
     MIN_RHO = MIN_DELTA / args.mesh_num

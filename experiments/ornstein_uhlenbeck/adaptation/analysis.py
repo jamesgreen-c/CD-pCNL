@@ -105,11 +105,13 @@ def plot_adaptation_with_d(dirpath, t: int = 10, steps: int = 100, mesh: int = 5
 
     if kernel_type.is_random_walk:        
         ax[0, 0].plot(ref1, np.log(rhos), label="Log rho", color="black")
-        ax[0, 0].plot(ref1, ref1, label="- log D", linestyle="--")
+        ax[0, 0].plot(ref1, - ref1, label="- log D", linestyle="--")
     
     else:
         ax[0, 0].plot(ref1, np.log(1 - rhos), label="Log rho", color="black")
-        ax[0, 0].plot(ref1, - ref1, label="- log D", linestyle="--")
+        # ax[0, 0].plot(ref1, - ref1, label="- log D", linestyle="--")
+        ax[0, 0].plot(ref1, - (1/5) * ref1, label="- (1/5) * log D", linestyle="--")
+        ax[0, 0].plot(ref1, - (1/10) * ref1, label="- (1/10) * log D", linestyle="--")
 
     ax[0, 0].set_ylabel("Final log rho after adaptation")
     ax[0, 0].set_xlabel("Log D")

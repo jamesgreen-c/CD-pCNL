@@ -47,15 +47,17 @@ STEPS = (100,)
 # STEPS = (10, 50, 100, 150, 200,)
 
 # MESH_NUMS = (5, 10, 20, 40, 80, 160, 320, )
-MESH_NUMS = (10,)
+MESH_NUMS = (50,)
 
 KERNELS = (
     KernelType.PCN,
     KernelType.RW_CSMC,
     KernelType.PCNL,
+    KernelType.MALA_CSMC,
 )
 
 STYLES = (
+    'na',
     'na',
     'na',
     'na',
