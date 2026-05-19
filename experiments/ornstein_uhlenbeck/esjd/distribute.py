@@ -38,12 +38,12 @@ def results_exist(*, kernel, style, D, steps, mesh_num, args) -> bool:
     return os.path.exists(datapath)
 
 
-# DS = (1, 5, 10, 25, 50, 75, 100, 150, 200, ) # 500, )
-DS = (5, )
+DS = (1, 5, 10, 25, 50, 75, 100, 150, 200, 250, 300, )
+# DS = (5, )
 TS = (10,)
 STEPS = (100, )
-MESH_NUMS = (10, 20, 40, 80, 160, 320, )
-# MESH_NUMS = (10, )
+# MESH_NUMS = (10, 20, 40, 80, 160, 320, )
+MESH_NUMS = (10, )
 
 # STEPS = (10, 50, 100, 150, 200,)
 # MESH_NUMS = (5, 10, 25, 50, 100, 200, )
@@ -52,11 +52,15 @@ MESH_NUMS = (10, 20, 40, 80, 160, 320, )
 KERNELS = (
     KernelType.CSMC,
     KernelType.PCN,
-    KernelType.RW_CSMC
+    KernelType.RW_CSMC,
+    KernelType.PCNL,
+    KernelType.MALA_CSMC,
 )
 
 STYLES = (
     'guided',
+    'na',
+    'na',
     'na',
     'na'
 )
@@ -65,9 +69,14 @@ RHO_SCALING = (
     1,
     1/5,
     1,
+    1/10,
+    1,
 )
+
 RHO_ARG = (
     'D',
+    'D',
+    'DM',
     'D',
     'DM',
 )
