@@ -53,10 +53,14 @@ KERNELS = (
     KernelType.CSMC,
     KernelType.PCN,
     KernelType.RW_CSMC,
+    KernelType.PCNL,
+    KernelType.MALA_CSMC,
 )
 
 STYLES = (
     'guided',
+    'na',
+    'na',
     'na',
     'na',
 )

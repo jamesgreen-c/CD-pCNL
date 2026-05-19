@@ -92,7 +92,7 @@ EXPERIMENT_KEYS = jax.random.split(KEY, args.K)
 
 kernel_type = KernelType(args.kernel)
 
-if kernel_type.name == "RW_CSMC":
+if KernelType.is_random_walk:
     if args.rho_arg == "D":
         RHO = args.delta / args.D ** args.rho_scale
     elif args.rho_arg == "T":

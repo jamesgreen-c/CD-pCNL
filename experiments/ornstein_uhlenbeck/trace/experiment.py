@@ -123,7 +123,7 @@ elif args.delta_arg == "DT" or args.delta_arg == "TD":
 else:
     DELTA = args.delta
 
-if kernel_type.name == "RW_CSMC":
+if kernel_type.is_random_walk:
     # overwrite rho config
     RHO = DELTA / args.mesh_num
     MIN_RHO = MIN_DELTA / args.mesh_num
