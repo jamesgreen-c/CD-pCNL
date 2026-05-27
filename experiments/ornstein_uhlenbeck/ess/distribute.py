@@ -9,16 +9,18 @@ from experiments.ornstein_uhlenbeck.kernels import KernelType
 parser = argparse.ArgumentParser()
 
 parser.add_argument("--i", dest="i", type=int, default=-1)
+parser.add_argument("--start-i", dest="start_i", type=int, default=0)
+
 parser.add_argument("--seed", dest="seed", type=int, default=1234)
 
 parser.add_argument("--N", dest="N", type=int, default=31)
-parser.add_argument("--M", dest="M", type=int, default=100)
+parser.add_argument("--M", dest="M", type=int, default=4)
 
 parser.add_argument("--rho", dest="rho", type=float, default=.25)
 
-parser.add_argument("--adaptation", dest="adaptation", type=int, default=3000)
-parser.add_argument("--burnin", dest="burnin", type=int, default=1000)
-parser.add_argument("--n-samples", dest="n_samples", type=int, default=2000)
+parser.add_argument("--adaptation", dest="adaptation", type=int, default=2_000)
+parser.add_argument("--burnin", dest="burnin", type=int, default=500)
+parser.add_argument("--n-samples", dest="n_samples", type=int, default=1_000)
 
 parser.add_argument(
     "--mode",
@@ -169,7 +171,12 @@ print(f"kernels:               {[k.name for k, _ in KERNELS]}")
 if args.i != -1 and not (0 <= args.i < len(COMBINATIONS)):
     raise ValueError(f"--i must be in [0, {len(COMBINATIONS) - 1}] or -1, got {args.i}")
 
-indices = range(len(COMBINATIONS)) if args.i == -1 else [args.i]
+if not (0 <= args.start_i < len(COMBINATIONS)):
+    raise ValueError(
+        f"--start-i must be in [0, {len(COMBINATIONS) - 1}], got {args.start_i}"
+    )
+
+indices = range(args.start_i, len(COMBINATIONS)) if args.i == -1 else [args.i]
 
 
 for j in indices:
