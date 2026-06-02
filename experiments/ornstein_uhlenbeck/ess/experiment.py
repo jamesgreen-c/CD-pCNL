@@ -278,6 +278,7 @@ def one_experiment(key):
         conditional=True
     )
     adaptation_kernel = jax.jit(kernel)
+    kernel = jax.jit(kernel)
 
     adaptation_loop = jax.jit(adaptation_loop, static_argnums=(2, 6), static_argnames=("window_size", "target_stat", "shared_delta", "shared_rho", "rho_direction"))
     experiment_loop = jax.jit(experiment_loop, static_argnums=(2, 3, 4, 5))
@@ -361,12 +362,17 @@ delta_acc_rates_hist_all = np.empty((args.K, args.adaptation,))
 rho_acc_rates_hist_all = np.empty((args.K, args.adaptation,))
 
 # Warm up (remove JIT compilation time from runtime measurements)
-warmup_out = one_experiment(WARMUP_KEY)
-block_until_ready_tree(warmup_out)
+# warmup_out = one_experiment(WARMUP_KEY)
+# block_until_ready_tree(warmup_out)
+
+# Compile once, without executing a full experiment
+start = time.time()
+compiled_one_experiment = one_experiment.lower(WARMUP_KEY).compile()
+print(f"Compile time: {time.time() - start:.2f} seconds.")
 
 for k, key_k in enumerate(tqdm.tqdm(EXPERIMENT_KEYS, desc="Experiment: ")):
     start = time.time()
-    ess_k, adaptation_hist_k = one_experiment(key_k)
+    ess_k, adaptation_hist_k = compiled_one_experiment(key_k)
     block_until_ready_tree((ess_k, adaptation_hist_k))
     time_k = time.time() - start
 
