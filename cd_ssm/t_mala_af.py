@@ -139,9 +139,10 @@ def kernel(
     # auxiliary endpoint proposals
     ells = jnp.broadcast_to(jnp.atleast_1d(ells), (T,))
     aux_e_std_devs = jnp.sqrt(0.5 * ells)
-    aux_es = e_star + jax.random.normal(key_aux_e, shape=(T, d_x)) * aux_e_std_devs[:, None] # aux_e_t = e_star_t + N(0, 0.5 * ell_t * I)
+    eps_aux_es = jax.random.normal(key_aux_e, shape=(T, d_x))
+    aux_es = e_star + 0.5 * ells[:, None] * e_grad_log_w_star + aux_e_std_devs[:, None] * eps_aux_es
     eps_es = jax.random.normal(key_proposals_e, shape=(T, N + 1, d_x))
-    es = aux_es[:, None, :] + aux_e_std_devs[:, None, None] * eps_es                         # e_t = aux_e_t + N(0, 0.5 * ell_t * I)
+    es = aux_es[:, None, :] + aux_e_std_devs[:, None, None] * eps_es
 
     # auxiliary Wiener proposals
     dt_0, dts = Gamma__0_params[-1], Gamma_params[-1]
