@@ -211,14 +211,15 @@ def get_data(
     event_types = jax.random.randint(key_type, (K,), minval=0, maxval=5)
     keys_y = jax.random.split(key_y, K)
 
+    z_Fs, z_chol_Bs = jax.vmap(lambda dt: ou_diag_transition(A, chol_Q_z, dt))(dts)
     eps_zs, eps_etas = jax.random.normal(sampling_key, (2, K, dim))
 
     def body(carry, inps):
         z_k, eta_k = carry
-        dt, eps_z, eps_eta, key_y_k, bond_idx, event_type = inps
+        dt, F, chol_B, eps_z, eps_eta, key_y_k, bond_idx, event_type = inps
 
         # sample next latent state
-        z_kp1 = z_k + dt * (-A @ z_k) + jnp.sqrt(dt) * (eps_z @ chol_Q_z.T)
+        z_kp1 = z_k @ F.T + eps_z @ chol_B.T
         eta_kp1 = eta_k + jnp.sqrt(dt) * (eps_eta @ chol_Q_eta.T)
         x_kp1 = (z_kp1, eta_kp1)
 
@@ -229,7 +230,7 @@ def get_data(
         return x_kp1, (x_kp1, obs_k)
 
     carry0 = (z0, eta0)
-    inps = (dts, eps_zs, eps_etas, keys_y, bond_idxs, event_types)
+    inps = (dts, z_Fs, z_chol_Bs, eps_zs, eps_etas, keys_y, bond_idxs, event_types)
     _, (xs, obs) = jax.lax.scan(body, carry0, inps)
     return xs, obs
 

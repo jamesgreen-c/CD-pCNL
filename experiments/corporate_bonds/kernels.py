@@ -26,6 +26,7 @@ from cd_ssm import t_mala_af
 from cd_ssm import rw_csmc
 from cd_ssm import bridge
 from cd_ssm import adaptation as adpt
+from cd_ssm import gueant as gueant_csmc
 
 
 class KernelType(Enum):
@@ -220,8 +221,8 @@ def get_gueant_csmc_kernel(
 
     # precompute exact transition parameters
     z_Fs, z_chol_Bs = jax.vmap(lambda dt: ou_diag_transition(A, chol_Q_z, dt))(dts)
-    inv_chol_Q_z = solve_triangular(chol_Q_z, jnp.eye(D), lower=True)
-    inv_chol_Q_eta = solve_triangular(chol_Q_eta, jnp.eye(D), lower=True)
+    inv_chol_P0_z = solve_triangular(chol_P0_z, jnp.eye(D), lower=True)
+    inv_chol_P0_eta = solve_triangular(chol_P0_eta, jnp.eye(D), lower=True)
 
     # premap over obs tuples
     obs_0 = jax.tree_util.tree_map(lambda x: x[0], obs)
@@ -231,37 +232,24 @@ def get_gueant_csmc_kernel(
 
         def M0_rvs(key, _):
             key, subkey = jr.split(key)
-
-            # sample z0 from N(0, P0_z), eta_0 from N(0, P0_eta)
             z_0 = jr.normal(key, (N, D)) @ chol_P0_z.T
             eta_0 = jr.normal(subkey, (N, D)) @ chol_P0_eta.T
             return (z_0, eta_0)
 
-        def Mt_rvs(key, x_t_m_1, params):
-            obs_t, F_t, chol_B_t, dt = params
-            z_t_m_1, eta_t_m_1 = x_t_m_1
-            key, subkey = jr.split(key)
-            
-            # sample z_t exactly and eta_t guided
-            eps_z = jr.normal(key, (N, D))
-            z_t = (z_t_m_1 @ F_t.T) + eps_z @ chol_B_t.T
-            eta_t = mid_price_proposal(subkey, z_t, eta_t_m_1, obs_t, psi, chol_Q_eta, chol_R, dt)
-            return (z_t, eta_t)
-
         def M0_logpdf(x):
             z, eta = x
-            val = mvn_logpdf(z, jnp.zeros_like(z), None, chol_inv=inv_chol_Q_z)
-            val += mvn_logpdf(eta, jnp.zeros_like(eta), None, chol_inv=inv_chol_Q_eta)
+            val = mvn_logpdf(z, jnp.zeros_like(z), None, chol_inv=inv_chol_P0_z)
+            val += mvn_logpdf(eta, jnp.zeros_like(eta), None, chol_inv=inv_chol_P0_eta)
             return val
         
         def Mt_logpdf(x_t_m_1, x_t, params):
             z_t_m_1, eta_t_m_1 = x_t_m_1
             z_t, eta_t = x_t
-            obs_t, F_t, chol_B_t, _ = params
+            _, F_t, chol_B_t, dt = params
 
             # calculate inverse cholesky factors
             inv_chol_B = solve_triangular(chol_B_t, jnp.eye(D), lower=True)
-            inv_chol_Q_eta = solve_triangular(chol_Q_eta, jnp.eye(D), lower=True)
+            inv_chol_Q_eta = solve_triangular(jnp.sqrt(dt) * chol_Q_eta, jnp.eye(D), lower=True)
 
             # spread and YtB evaluation
             val = mvn_logpdf(z_t, z_t_m_1 @ F_t.T, None, chol_inv=inv_chol_B, constant=False)
@@ -281,10 +269,15 @@ def get_gueant_csmc_kernel(
         raise NotImplementedError(f"Unknown style: {style}, choose from 'guided'")
 
     M0 = M0_rvs, M0_logpdf
-    Mt = Mt_rvs, Mt_logpdf, (obs_ts, z_Fs[1:], z_chol_Bs[1:], dts[1:])
+    Mt_params = (obs_ts, z_Fs[1:], z_chol_Bs[1:], dts[1:])
     Gamma_t_plus_params = Gamma_t, (obs_ts, z_Fs[1:], z_chol_Bs[1:], dts[1:])
 
-    kernel = lambda key, state, *_: t_csmc.kernel(key, state[0], state[1], M0, Gamma_0, Mt, Gamma_t_plus_params, N=N, **kwargs)
+    kernel = lambda key, state, *_: gueant_csmc.kernel(
+        key, state[0], state[1], 
+        M0, Gamma_0, 
+        Mt_params, Gamma_t_plus_params,
+        observation_logpdf, chol_Q_eta, chol_R, psi, 
+        N=N, **kwargs)
     init = lambda x: (x, jnp.zeros((T,), dtype=int))
 
     def sampling_routine_fn(key, state, kernel_, n_steps, verbose, get_samples):
