@@ -61,66 +61,70 @@ def kernel(
     #       Guided proposal functions         #
     ###########################################
 
-    def Mt_tilde_rvs(key, x_t_m_1, params):
-        key_z, key_eta = jr.split(key)
-
+    def z_transition_rvs(key, x_t_m_1, params):
         # unpack
-        obs_t, F_t, chol_B_t, dt = params
-        z_t_m_1, eta_t_m_1 = x_t_m_1
-        N = z_t_m_1.shape[0]
+        _, F_t, chol_B_t, _ = params
+        z_t_m_1, _ = x_t_m_1
 
-        # propose
-        eps_z = jr.normal(key_z, shape=(N, D))
+        # propose only the half-spread state first, as in Guéant Step 1
+        eps_z = jr.normal(key, shape=(N, D))
         z_t = z_t_m_1 @ F_t.T + eps_z @ chol_B_t.T
-        eta_t = mid_price_proposal(key_eta, z_t, eta_t_m_1, obs_t, psi, chol_Q_eta, chol_R, dt)
-        return (z_t, eta_t)
-
-    def log_Mt_tilde(x_t_m_1, x_t, params):
-        return Mt_tilde_logpdf(x_t_m_1, x_t, params, obs_logpdf, chol_Q_eta, chol_R, psi)
+        return z_t
 
     #################################
     #        Initialisation         #
     #################################
-    x0 = M_0_rvs(key_init, N + 1)
+    x0 = M_0_rvs(key_init, N)
     if conditional:
         x0 = tree_map(lambda x0_, xs0_: x0_.at[b_star[0]].set(xs0_), x0, tree_map(lambda x: x[0], x_star))
 
     # Compute initial weights and normalize
     log_w0 = Gamma_0(x0) - M_0_logpdf(x0)
     log_w0 = normalize(log_w0, log_space=True)
-    w0 = jnp.exp(log_w0)
 
     #################################
     #        Forward pass           #
     #################################
 
     def body(carry, inp):
-        w_t_m_1, x_t_m_1 = carry
+        log_w_t_m_1, x_t_m_1 = carry
         M_t_params, Gamma_params_t, x_star_t, b_star_t_m_1, b_star_t, key_t = inp
 
-        key_proposal_t, key_resampling_t = jax.random.split(key_t, 2)
+        key_z_t, key_resampling_t, key_eta_t = jr.split(key_t, 3)
 
-        # Conditional resampling
-        A_t = resampling_func(key_resampling_t, w_t_m_1, b_star_t_m_1, b_star_t, conditional)
+        # Step 1: propose z_t candidates from the exact z transition
+        z_t_hat = z_transition_rvs(key_z_t, x_t_m_1, M_t_params)
+
+        # Step 2: compute auxiliary/predictive weights before drawing eta_t
+        obs_t, _, _, dt = M_t_params
+        _, eta_t_m_1 = x_t_m_1
+        log_pred_t = predictive_obs_logpdf(z_t_hat, eta_t_m_1, obs_t, psi, chol_Q_eta, chol_R, dt)
+        log_aux_w_t = normalize(log_w_t_m_1 + log_pred_t, log_space=True)
+        w_aux_t = jnp.exp(log_aux_w_t)
+
+        # Step 3: resample ancestors using the predictive weights
+        A_t = resampling_func(key_resampling_t, w_aux_t, b_star_t_m_1, b_star_t, conditional)
         x_t_m_1 = tree_map(lambda x: jnp.take(x, A_t, axis=0), x_t_m_1)
+        z_t = jnp.take(z_t_hat, A_t, axis=0)
 
-        # Sample proposal
-        x_t = Mt_tilde_rvs(key_proposal_t, x_t_m_1, M_t_params)
+        # Step 4--6: draw eta_t from the conditional guided proposal
+        eta_t_m_1 = x_t_m_1[1]
+        eta_t = mid_price_proposal(key_eta_t, z_t, eta_t_m_1, obs_t, psi, chol_Q_eta, chol_R, dt)
+        x_t = (z_t, eta_t)
+
         if conditional:
             x_t = tree_map(lambda xt_, xs_t_: xt_.at[b_star_t].set(xs_t_), x_t, x_star_t)
 
-        log_w_t = Gamma_t(x_t_m_1, x_t, Gamma_params_t) - log_Mt_tilde(x_t_m_1, x_t, M_t_params)
-        log_w_t = normalize(log_w_t, log_space=True)
-        w_t = jnp.exp(log_w_t)
-
+        # Fully adapted after auxiliary resampling: equal filtering weights.
+        log_w_t = -jnp.log(N) * jnp.ones((N,))
         # Return next step
-        next_carry = w_t, x_t
+        next_carry = log_w_t, x_t
         save = log_w_t, A_t, x_t
 
         return next_carry, save
 
     inputs = (M_t_params, Gamma_params, tree_map(lambda x: x[1:], x_star), b_star[:-1], b_star[1:], keys_forward)
-    _, (log_ws, As, xs) = jax.lax.scan(body, (w0, x0), inputs)
+    _, (log_ws, As, xs) = jax.lax.scan(body, (log_w0, x0), inputs)
 
     log_ws = jnp.insert(log_ws, 0, log_w0, axis=0)
     xs = tree_map(lambda xs_, x0_: jnp.insert(xs_, 0, x0_, axis=0), xs, x0)
@@ -152,7 +156,7 @@ def _logdiffexp(a: Array, b: Array):
     """
     Computes log(exp(a) - exp(b)), assuming a >= b.
     """
-    return a + jnp.log1p(-jnp.exp(b - a))
+    return jnp.where(b < a, a + jnp.log1p(-jnp.exp(b - a)), -jnp.inf)
 
 
 def predictive_obs_logpdf(
@@ -191,10 +195,12 @@ def predictive_obs_logpdf(
     case_1 = lambda: norm.logpdf(obs_value - half_spread, loc=eta_prev_i, scale=std_tilde)
     case_2 = lambda: norm.logcdf(eta_prev_i - (obs_value + half_spread), loc=0.0, scale=std_tilde)
     case_3 = lambda: norm.logcdf((obs_value - half_spread) - eta_prev_i, loc=0.0, scale=std_tilde)
+
     def case_4():
         log_hi = norm.logcdf((obs_value + alpha_i) - eta_prev_i, loc=0.0, scale=std_tilde)
         log_lo = norm.logcdf((obs_value - alpha_i) - eta_prev_i, loc=0.0, scale=std_tilde)
         return _logdiffexp(log_hi, log_lo)
+
     return jax.lax.switch(event_type, [case_0, case_1, case_2, case_3, case_4])
 
 
@@ -214,8 +220,8 @@ def mid_price_proposal(
     Parameters
     ----------
     z:        (N, D)
-    eta_prev:(N, D)
-    obs:     Tuple (bond_idx, event_type, alpha_i, obs_value)
+    eta_prev: (N, D)
+    obs:      Tuple (bond_idx, event_type, alpha_i, obs_value)
 
     Returns
     -------
@@ -264,10 +270,7 @@ def mid_price_proposal(
         shape=(N,),
     )
 
-    eta_i_tilde = jax.lax.switch(
-        event_type,
-        [case_0, case_1, case_2, case_3, case_4],
-    )
+    eta_i_tilde = jax.lax.switch(event_type, [case_0, case_1, case_2, case_3, case_4])
 
     # eta_i | eta_i + eps_i, eta_{i,t-1}
     mean_i = (var_i * dt * eta_i_tilde + var_eps * eta_prev_i) / var_tilde
@@ -309,15 +312,15 @@ def Mt_tilde_logpdf(
     obs_t, F_t, chol_B_t, dt = params
 
     # inverse cholesky factors
-    inv_chol_B = solve_triangular(chol_B_t,jnp.eye(D), lower=True)
+    inv_chol_B = solve_triangular(chol_B_t, jnp.eye(D), lower=True)
     inv_chol_eta_dt = solve_triangular(jnp.sqrt(dt) * chol_Q_eta, jnp.eye(D), lower=True)
 
     # prior log pdfs
-    log_q_z = mvn_logpdf(z_t, z_t_m_1 @ F_t.T, None, chol_inv=inv_chol_B, constant=True)
-    log_prior_eta = mvn_logpdf(eta_t, eta_t_m_1, None, chol_inv=inv_chol_eta_dt, constant=True)
+    log_q_z = mvn_logpdf(z_t, z_t_m_1 @ F_t.T, None, chol_inv=inv_chol_B, constant=False)
+    log_prior_eta = mvn_logpdf(eta_t, eta_t_m_1, None, chol_inv=inv_chol_eta_dt, constant=False)
     log_g = observation_logpdf(z_t, eta_t, obs_t, psi, chol_R)
 
     # guided correction
-    log_pred = predictive_obs_logpdf(z_t,eta_t_m_1, obs_t, psi, chol_Q_eta, chol_R, dt)
+    log_pred = predictive_obs_logpdf(z_t, eta_t_m_1, obs_t, psi, chol_Q_eta, chol_R, dt)
 
     return log_q_z + log_prior_eta + log_g - log_pred

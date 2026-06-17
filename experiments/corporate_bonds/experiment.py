@@ -4,37 +4,18 @@ import time
 
 import jax
 import jax.numpy as jnp
-from jax.tree_util import tree_map
-from jax.scipy.special import logsumexp
 
-import matplotlib.pyplot as plt
 import numpy as np
 import tqdm
 
 from experiments.corporate_bonds.kernels import KernelType, get_gueant_csmc_kernel
-from experiments.corporate_bonds.model import get_data, get_half_spread_dynamics, get_ytb_dynamics
+from experiments.corporate_bonds.model import get_data
 
-from cd_ssm import bridge
 from cd_ssm.utils.common import force_move, barker_move
-from cd_ssm.utils.kalman import sampling, filtering
 from cd_ssm.utils.resamplings import killing, multinomial
-from cd_ssm.utils.timing import block_until_ready_tree
-
-import tensorflow_probability.substrates.jax as tfp
 
 # jax.config.update("jax_enable_x64", False)
 # jax.config.update("jax_platform_name", "cpu")
-
-# --- general config ---
-MIN_DELTA = 1e-12
-MAX_DELTA = 1e1
-MIN_RHO = 1e-5
-MAX_RHO = 1 - 1e-5
-DELTA_MIN_RATE = 1e-3
-RHO_MIN_RATE = 1e-6
-ADAPTATION_WINDOW = 100
-DELTA_ADAPTATION_RATE = 0.5
-RHO_ADAPTATION_RATE = 0.025
 
 # ARGS PARSING
 parser = argparse.ArgumentParser()
@@ -43,30 +24,16 @@ parser.add_argument("--T", dest="T", type=int, default=10)
 parser.add_argument("--D", dest="D", type=int, default=1)
 parser.add_argument("--K", dest="K", type=int, default=1)
 parser.add_argument("--M", dest="M", type=int, default=5)
+parser.add_argument("--steps", type=int, default=100)
+
+parser.add_argument("--independent", action="store_true")
+parser.set_defaults(independent=False)
 
 parser.add_argument("--log-var", dest="log_var", type=float, default=0)
 parser.add_argument("--phi", dest="phi", type=float, default=0.8)
 
-parser.add_argument("--steps", type=int, default=100)
-parser.add_argument("--mesh-num", dest="mesh_num", type=int, default=10)
-
-parser.add_argument("--adaptation", dest="adaptation", type=int, default=500)
-parser.add_argument("--burnin", dest="burnin", type=int, default=0)
-parser.add_argument("--n-samples", dest="n_samples", type=int, default=1000)
-
-parser.add_argument("--rho", dest="rho", type=float, default=.25)
-parser.add_argument("--rho-scale", dest="rho_scale", type=float, default=1/5)
-parser.add_argument("--rho-arg", dest="rho_arg", type=str, default="D")
-
-parser.add_argument("--delta", dest="delta", type=float, default=1)
-parser.add_argument("--delta-scale", dest="delta_scale", type=float, default=1)
-parser.add_argument("--delta-arg", dest="delta_arg", type=str, default="D")
-
-parser.add_argument("--target", dest="target", type=int, default=75)
-parser.add_argument("--target-stat", dest='target_stat', type=str, default="mean")
 
 parser.add_argument("--seed", dest="seed", type=int, default=1234)
-parser.add_argument("--kernel", dest="kernel", type=int, default=KernelType.CSMC)
 parser.add_argument("--style", dest="style", type=str, default="guided")
 
 parser.add_argument("--backward", action='store_true')
@@ -81,85 +48,27 @@ parser.add_argument("--debug", action='store_true')
 parser.add_argument('--no-debug', dest='debug', action='store_false')
 parser.set_defaults(debug=False)
 
-parser.add_argument("--verbose", action='store_true')
-parser.add_argument('--no-verbose', dest='verbose', action='store_false')
-parser.set_defaults(verbose=False)
-
-parser.add_argument("--plot", action='store_true')
-parser.add_argument('--no-plot', dest='plot', action='store_false')
-parser.set_defaults(plot=False)
-
 args = parser.parse_args()
+kernel_type = KernelType.GUEANT
 
 print(f"""
 ##################################
-#        LGSSM EXPERIMENT        #
+#  CORPORATE BOND EXPERIMENT     #
 ##################################
 Configuration:
     - T:         {args.T}
-    - kernel:    {KernelType(args.kernel).name}
+    - kernel:    {kernel_type.name}
     - style:     {args.style}
     - D:         {args.D}
-    - N-samples  {args.n_samples}
-    - Adaptation {args.adaptation}
-    - Burnin     {args.burnin}
+    - M:         {args.M}
+    - steps:     {args.steps}
 """)
-
-# BACKEND CONFIG
-NOW = time.time()
 
 # PARAMETERS
 KEY = jax.random.PRNGKey(args.seed)
 ALL_KEYS = jax.random.split(KEY, args.K + 1)
 WARMUP_KEY = ALL_KEYS[0]
 EXPERIMENT_KEYS = ALL_KEYS[1:]
-
-kernel_type = KernelType(args.kernel)
-SHARED_DELTA = kernel_type.shared_delta()
-SHARED_RHO = kernel_type.shared_rho()
-
-# DELTA AND RHO CONFIG
-if args.delta_arg == "D":
-    DELTA = args.delta / args.D ** args.delta_scale
-elif args.delta_arg == "T":
-    DELTA = args.delta / args.T ** args.delta_scale
-elif args.delta_arg == "DT" or args.delta_arg == "TD":
-    DELTA = args.delta / (args.D * args.T) ** args.delta_scale
-else:
-    DELTA = args.delta
-
-if kernel_type.is_random_walk:
-    # overwrite rho config
-    RHO = DELTA / args.mesh_num
-    MIN_RHO = MIN_DELTA / args.mesh_num
-    MAX_RHO = MAX_DELTA
-    RHO_MIN_RATE = DELTA_MIN_RATE
-    RHO_ADAPTATION_RATE = DELTA_ADAPTATION_RATE
-    RHO_DIRECTION = +1
-
-else:
-    RHO_DIRECTION = -1
-    rho_m1 = 1 - args.rho
-    if args.rho_arg == "D":
-        RHO = 1 - (rho_m1 / args.D ** args.rho_scale)
-    elif args.rho_arg == "T":
-        RHO = 1 - (rho_m1 / args.T ** args.rho_scale)
-    elif args.rho_arg == "DT" or args.rho_arg == "TD":
-        RHO = 1 - (rho_m1 / (args.D * args.T) ** args.rho_scale)
-    else:
-        RHO = args.rho
-
-print(f"""
-ADAPTATION CONFIG:        
-    - delta init:                {DELTA}
-    - min/max delta:             {MIN_DELTA}/{MAX_DELTA}
-    - delta adaptation rate:     {DELTA_ADAPTATION_RATE}
-    - rho init:                  {RHO}
-    - min/max rho:               {MIN_RHO}/{MAX_RHO}
-    - rho adaptation rate:       {RHO_ADAPTATION_RATE}
-    - rho adaptation direction:  {RHO_DIRECTION}
-""")
-
 
 if args.resampling == "killing":
     resampling_fn = killing
@@ -175,51 +84,31 @@ elif args.last_step == "barker":
 else:
     raise ValueError(f"Unknown last step {args.last_step}")
 
-
-# --- target acceptance rate ---
-TARGET_ALPHA = args.target / 100 
-if args.target_stat.isnumeric():
-    TARGET_STAT = float(args.target_stat) / 100
-else:
-    TARGET_STAT = args.target_stat
-
 # --- dynamics config ---
 A = args.phi * jnp.eye(args.D)
 CHOL_P0_Z = 0.1 * jnp.eye(args.D)
 CHOL_P0_ETA = 0.1 * jnp.eye(args.D)
 CHOL_Q_Z = 10 ** (args.log_var / 2) * jnp.eye(args.D)  # independent spreads
-CHOL_Q_ETA = 0.1 * jax.random.normal(jax.random.PRNGKey(913123), (args.D, args.D))
 
-PSI = None
+vol_eta = 0.10 * jnp.array([1.00, 1.24, 1.38])
+corr_eta = jnp.array([
+    [1.000, 0.60, 0.58],
+    [0.60, 1.000, 0.65],
+    [0.58, 0.65, 1.000],
+])
+Q_eta = corr_eta * vol_eta[:, None] * vol_eta[None, :]
+CHOL_Q_ETA_TRUE = jnp.linalg.cholesky(Q_eta)
+
+if args.independent:
+    CHOL_Q_ETA = 0.1 * jnp.eye(args.D)
+else:
+    CHOL_Q_ETA = CHOL_Q_ETA_TRUE
+
 CHOL_R = 0.1 * jnp.eye(args.D)
-ALPHA = None
+PSI = 0.05 * jnp.ones(args.D)
+ALPHA = 0.10 * jnp.ones(args.D)
 
 DTs = jnp.repeat(args.T / args.steps, args.steps)
-Ts = jnp.cumsum(DTs)
-DRIFT_z, DIFFUSION_z = get_half_spread_dynamics(A, CHOL_Q_Z)
-DRIFT_eta, DIFFUSION_eta = get_ytb_dynamics()
-OBS_SIGMA = 0.2
-
-# --- path reconstructor ---
-def to_path(us, es, diffusion):
-    """
-    us: (n_samples, M, steps, mesh, D)
-    es: (n_samples, M, steps, D)
-    """
-    @jax.vmap
-    def _to_path(_us, _es):
-        """
-        _us: (M, steps, mesh, D)
-        _es: (M, steps, D)
-        """
-        _reconstructor = jax.vmap(lambda u, ep, e, t, dt: bridge.to_path(diffusion, u, ep, e, t, dt))
-        return _reconstructor(_us[1:], _es[:-1], _es[1:], Ts[1:], DTs[1:])
-    
-    return _to_path(us, es)
-
-to_path_z = jax.vmap(lambda _us, _es: to_path(_us, _es, DIFFUSION_z))
-to_path_eta = jax.vmap(lambda _us, _es: to_path(_us, _es, DIFFUSION_eta))
-
 
 # ------- experiment function -------
 
@@ -229,16 +118,17 @@ def one_experiment(key):
 
     true_xs, obs, *_ = get_data(
         data_key, args.D, DTs, 
-        A, PSI, CHOL_P0_Z, CHOL_P0_ETA, CHOL_Q_Z, CHOL_Q_ETA, CHOL_R, ALPHA
+        A, PSI, CHOL_P0_Z, CHOL_P0_ETA, CHOL_Q_Z, CHOL_Q_ETA_TRUE, CHOL_R, ALPHA,
+        sparsity_factor=10.0
     )
 
     csmc_kernel, csmc_init, *_ = get_gueant_csmc_kernel(
         obs, A, PSI, CHOL_P0_Z, CHOL_P0_ETA, CHOL_Q_Z, CHOL_Q_ETA, CHOL_R,
         N=args.N, dts=DTs,
         resampling_func=resampling_fn,
-        backward=True,
+        backward=args.backward,
         ancestor_move_func=last_step_fn,
-        style="guided", 
+        style=args.style, 
         conditional=False
     )
     init_state = csmc_init(true_xs)   # no leakage as conditional = False
@@ -247,7 +137,7 @@ def one_experiment(key):
         return csmc_kernel(k_, init_state)
 
     sample_keys = jax.random.split(sample_key, args.M)
-    samples = jax.vmap(_independent_sample)(sample_keys)
+    samples, *_ = jax.vmap(_independent_sample)(sample_keys)
 
     return samples, true_xs, obs 
 
@@ -257,16 +147,16 @@ compiled_one_experiment = one_experiment.lower(WARMUP_KEY).compile()
 print(f"Compile time: {time.time() - start:.2f} seconds.")
 
 # storage
-zs_all = np.empty((args.K, args.T, args.M, args.D))
-etas_all = np.empty((args.K, args.T, args.M, args.D))
+zs_all = np.empty((args.K, args.M, args.steps, args.D))
+etas_all = np.empty((args.K, args.M, args.steps, args.D))
 
-true_zs_all = np.empty((args.K, args.T, args.D))
-true_etas_all = np.empty((args.K, args.T, args.D))
+true_zs_all = np.empty((args.K, args.steps, args.D))
+true_etas_all = np.empty((args.K, args.steps, args.D))
 
-bond_indices_all = np.empty((args.K, args.T))
-event_types_all = np.empty((args.K, args.T))
-alphas_all = np.empty((args.K, args.T))
-obs_values_all = np.empty((args.K, args.T))
+bond_indices_all = np.empty((args.K, args.steps))
+event_types_all = np.empty((args.K, args.steps))
+alphas_all = np.empty((args.K, args.steps))
+obs_values_all = np.empty((args.K, args.steps))
 
 for k, key_k in enumerate(tqdm.tqdm(EXPERIMENT_KEYS, desc="Experiment: ")):
     samples_k, true_xs_k, obs_k = compiled_one_experiment(key_k)
@@ -287,14 +177,16 @@ for k, key_k in enumerate(tqdm.tqdm(EXPERIMENT_KEYS, desc="Experiment: ")):
 if not os.path.exists("results"):
     os.mkdir("results")
 
-experiment_name = "kernel={},style={},D={},T={},N={},mesh-num={},steps={},M={},s={},a={},b={},seed={}"
+experiment_name = "kernel={},style={},D={},T={},N={},steps={},M={},independent={},seed={}"
 experiment_name = experiment_name.format(
     kernel_type.name,
     args.style,
     args.D,
     args.T,
     args.N,
+    args.steps,
     args.M,
+    args.independent,
     args.seed,
 )
 

@@ -238,8 +238,8 @@ def get_gueant_csmc_kernel(
 
         def M0_logpdf(x):
             z, eta = x
-            val = mvn_logpdf(z, jnp.zeros_like(z), None, chol_inv=inv_chol_P0_z)
-            val += mvn_logpdf(eta, jnp.zeros_like(eta), None, chol_inv=inv_chol_P0_eta)
+            val = mvn_logpdf(z, jnp.zeros_like(z), None, chol_inv=inv_chol_P0_z, constant=False)
+            val += mvn_logpdf(eta, jnp.zeros_like(eta), None, chol_inv=inv_chol_P0_eta, constant=False)
             return val
         
         def Mt_logpdf(x_t_m_1, x_t, params):
