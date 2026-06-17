@@ -72,12 +72,12 @@ def _diag_or_vector_at(chol_R: Array, i: Array):
     ----------
     chol_R: (dim,) or (dim, dim)
     """
-    return jax.lax.cond(
-        chol_R.ndim == 1,
-        lambda _: chol_R[i],
-        lambda _: chol_R[i, i],
-        operand=None,
-    )
+    if chol_R.ndim == 1:
+        return chol_R[i]
+    elif chol_R.ndim == 2:
+        return chol_R[i, i]
+    else:
+        raise ValueError("chol_R must have shape (dim,) or (dim, dim).")
 
 def _logdiffexp(a: Array, b: Array):
     """ Computes log(exp(a) - exp(b)), assuming a >= b. """
@@ -135,7 +135,10 @@ def emission(
     case_1 = lambda: done_sell                                               # client sells to dealer D
     case_2 = lambda: done_buy - margin                                       # client buys from another dealer
     case_3 = lambda: done_sell + margin                                      # client sells to another dealer
-    case_4 = lambda: eta[i] + eps + jr.uniform(key_aux, -alpha[i], alpha[i]) # D2D trade: observed Y lies inside an interval around u_i + eps
+    case_4 = lambda: eta[i] + eps + jr.uniform(key_aux,
+                                               shape=(),
+                                               minval=-alpha[i],
+                                               maxval= alpha[i])             # D2D trade: observed Y lies inside an interval around u_i + eps
 
     return jax.lax.switch(event_type, [case_0, case_1, case_2, case_3, case_4])
 
@@ -157,7 +160,7 @@ def get_ytb_dynamics(chol_Q_eta: Array):
     return drift, diffusion
 
 
-@partial(jax.jit, static_argnums=(1,))
+@partial(jax.jit, static_argnums=(1, 11,))
 def get_data(
         key: PRNGKey,
         dim: int,
@@ -170,32 +173,33 @@ def get_data(
         chol_Q_eta: Array,
         chol_R: Array,
         alpha: Array,
+        sparsity_factor: float = 10.0,
 ):
     """
     Simulates corporate-bond latent states and sparse event observations.
 
     Parameters
     ----------
-    key:         PRNGKey
-    dim:         Number of bonds
-    dts:         (K,) Time increments
-    A:           (dim, dim) Discrete-time transition matrix for z
-    psi:         (dim,) Baseline half-spread scale
-    chol_P0_z:   (dim, dim) Initial Cholesky factor for z_0
-    chol_P0_eta: (dim, dim) Initial Cholesky factor for eta_0
-    chol_Q_z:    (dim, dim) Transition Cholesky factor for z
-    chol_Q_eta:  (dim, dim) Transition Cholesky factor for eta
-    chol_R:      (dim,) or (dim, dim) Observation noise standard deviations
-    alpha:       (dim,) D2D interval half-widths
+    key:             PRNGKey
+    dim:             Number of bonds
+    dts:             (K,) Time increments
+    A:               (dim, dim) Discrete-time transition matrix for z
+    psi:             (dim,) Baseline half-spread scale
+    chol_P0_z:       (dim, dim) Initial Cholesky factor for z_0
+    chol_P0_eta:     (dim, dim) Initial Cholesky factor for eta_0
+    chol_Q_z:        (dim, dim) Transition Cholesky factor for z
+    chol_Q_eta:      (dim, dim) Transition Cholesky factor for eta
+    chol_R:          (dim,) or (dim, dim) Observation noise standard deviations
+    alpha:           (dim,) D2D interval half-widths
+    sparsity_factor: Observation frequency ratio between non-final bonds and final bond.
 
     Returns
     -------
-    xs:   Tuple (etas, zs)
+    xs:   Tuple (zs, etas)
+            zs:   (K, dim)
             etas: (K, dim)
-            zs: (K, dim)
 
-    obs:  (K, 4)
-          obs[k] = [obs_value, bond_idx, event_type, alpha_i]
+    obs:  Tuple (bond_idxs, event_types, alphas, obs_values)
     """
 
     init_key, event_key, sampling_key = jax.random.split(key, 3)
@@ -207,7 +211,12 @@ def get_data(
     eta0 = chol_P0_eta @ jax.random.normal(init_key_eta, (dim,))
 
     key_bond, key_type, key_y = jax.random.split(event_key, 3)
-    bond_idxs = jax.random.randint(key_bond, (K,), minval=0, maxval=dim)
+
+    bond_weights = jnp.ones((dim,))
+    bond_weights = bond_weights.at[:-1].set(sparsity_factor)
+    bond_probs = bond_weights / jnp.sum(bond_weights)
+    bond_idxs = jax.random.categorical(key_bond, jnp.log(bond_probs), shape=(K,)).astype(jnp.int32)
+
     event_types = jax.random.randint(key_type, (K,), minval=0, maxval=5)
     keys_y = jax.random.split(key_y, K)
 
